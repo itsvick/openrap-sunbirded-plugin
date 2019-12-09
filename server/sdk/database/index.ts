@@ -2,7 +2,8 @@
  * @author Harish Kumar Gangula <harishg@ilimi.in>
  */
 import { frameworkAPI } from '@project-sunbird/ext-framework-server/api';
-
+import { logger } from '@project-sunbird/ext-framework-server/logger';
+import * as _ from 'lodash';
 /**
 * This SDK helps in performing operations with database and to create them
 * 
@@ -11,68 +12,73 @@ export default class DatabaseSDK {
 
     private pluginId: string;
     private url: string;
-    private connection: any;
+    private dbInstances: object;
+
 
     initialize(pluginId: string, url?: string) {
         this.pluginId = pluginId;
         this.url = url;
-        this.connection = frameworkAPI.getCouchDBInstance(this.pluginId);
-    }
-
-    createDatabase(database: string) {
-        return this.connection.db.create(database);
     }
 
     get(database: string, Id: string) {
-        return this.connection.db.use(database).get(Id);
+        logger.debug(`Getting the document: ${Id} in Database: ${_.upperCase(database)}`)
+        let db = frameworkAPI.getPouchDBInstance(this.pluginId, database);
+        return db.get(Id);
     }
 
     insert(database: string, doc: any, Id?: string) {
+        logger.info(`Inserting document:${Id} in database: ${_.upperCase(database)}`);
+        let db = frameworkAPI.getPouchDBInstance(this.pluginId, database);
         if (Id) {
-            return this.connection.db.use(database).insert(doc, Id);
+            doc._id = Id;
+            return db.put(doc);
         }
-        return this.connection.db.use(database).insert(doc);
+        return db.post(doc);
     }
 
     async update(database: string, docId, doc) {
-        let db = this.connection.db.use(database);
+        logger.debug(`Updating document with docId: ${docId} in database: ${_.upperCase(database)}`)
+        let db = frameworkAPI.getPouchDBInstance(this.pluginId, database);
         let docResponse = await db.get(docId);
-        let result = await db.insert({ ...docResponse, ...doc });
+        let result = await db.put({ ...docResponse, ...doc });
         return result;
     }
 
     async delete(database: string, docId) {
-        let db = this.connection.db.use(database);
+        let db = frameworkAPI.getPouchDBInstance(this.pluginId, database);
         let doc = await db.get(docId);
-        let result = await db.destroy(doc._id, doc._rev);
+        let result = await db.remove(doc._id, doc._rev);
         return result;
     }
 
-    createView(database: string, viewConfig) {
-        return this.connection.db.use(database).insert(viewConfig)
-    }
-
-    createIndex(database: string, indexDef) {
-        return this.connection.db.use(database).createIndex(indexDef);
-    }
-
     find(database: string, searchObj: Object) {
-        return this.connection.db.use(database).find(searchObj);
+        logger.debug(`Finding document in database: ${_.upperCase(database)}`);
+        let db = frameworkAPI.getPouchDBInstance(this.pluginId, database);
+        return db.find(searchObj);
     }
 
     bulk(database: string, documents: Object[]) {
-        return this.connection.db.use(database).bulk({ docs: documents });
+        logger.debug(`adding bulk documents to database: ${_.upperCase(database)}`)
+        let db = frameworkAPI.getPouchDBInstance(this.pluginId, database);
+        return db.bulkDocs(documents);
     }
 
     list(database: string, options: Object) {
-        return this.connection.db.use(database).list(options);
+        let db = frameworkAPI.getPouchDBInstance(this.pluginId, database);
+        return db.allDocs(options);
+    }
+    explain(database: string, options: Object) {
+        let db = frameworkAPI.getPouchDBInstance(this.pluginId, database);
+        return db.explain(options);
     }
 
     async upsert(database: string, docId: string, doc: any) {
-        let db = this.connection.db.use(database);
+        logger.debug(`Upserting document with docId:${docId} in database: "${_.upperCase(database)}" `)
+        let db = frameworkAPI.getPouchDBInstance(this.pluginId, database);
         let docNotFound = false;
         let docResponse = await db.get(docId).catch(err => {
-            if (err.statusCode === 404) {
+            logger.error(`Received error while getting doc from DB: ${_.upperCase(database)} and Error:${err}`);
+            if (err.status === 404) {
                 docNotFound = true;
             } else {
                 // if error is not doc not found then throwing error 
@@ -81,9 +87,11 @@ export default class DatabaseSDK {
         });
         let result;
         if (docNotFound) {
-            result = await db.insert(doc, docId);
+            logger.info(` Doc: ${docId}  NOT found in DB:${_.upperCase(database)}`)
+            doc._id = docId;
+            result = await db.put(doc);
         } else {
-            result = await db.insert({ ...docResponse, ...doc });
+            result = await db.put({ ...docResponse, ...doc });
         }
 
         return result;

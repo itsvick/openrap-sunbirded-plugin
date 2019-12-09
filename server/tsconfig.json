@@ -1,15 +1,11 @@
 {
-    "compilerOptions": {
-        "experimentalDecorators": true,
-        "emitDecoratorMetadata": true,
-        "declaration": true,
-        "module": "commonjs",
-        "declaration": true,
-        "outDir": "./dist",
-        "target": "es6"
-    },
-    "exclude": [
-        "node_modules",
-        "./**/*.spec.ts"
-    ]
+  "compilerOptions": {
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "module": "commonjs",
+    "declaration": true,
+    "outDir": "./dist",
+    "target": "es6"
+  },
+  "exclude": ["node_modules", "./**/*.spec.ts"]
 }

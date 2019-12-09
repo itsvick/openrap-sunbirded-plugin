@@ -7,6 +7,7 @@ import { logger } from "@project-sunbird/ext-framework-server/logger";
 import * as glob from 'glob';
 import * as _ from 'lodash';
 import { STATUS } from "OpenRAP/dist/managers/DownloadManager/DownloadManager";
+import { IDesktopAppMetadata, IAddedUsingType } from './IContent';
 
 let dbSDK = new DatabaseSDK();
 
@@ -43,7 +44,14 @@ export const addContentListener = (pluginId) => {
                                     */
                     // extract each file 
                     let fileName = path.basename(file.file, path.extname(file.file))
+
+                    // Deleting content folder if exist. This is done as content folder is not getting updated after unzipping content with updates
+                    await deleteContentFolder(file, fileSDK).catch(error => {
+                        logger.error(`Received Error while getting content data from db where error = ${error}`);
+                    });    
+
                     await fileSDK.unzip(path.join('ecars', file.file), path.join('content', fileName), false)
+                    await fileSDK.remove(path.join('ecars', file.file));
                     let zipFilePath = glob.sync(path.join(fileSDK.getAbsPath('content'), fileName, '**', '*.zip'), {});
                     if (zipFilePath.length > 0) {
                         // unzip the file if we have zip file
@@ -72,11 +80,31 @@ export const addContentListener = (pluginId) => {
                         metaData.visibility = "Parent"
                     }
                     metaData.baseDir = `content/${fileName}`;
-                    metaData.desktopAppMetadata = {
-                        "ecarFile": file.file,  // relative to ecar folder
-                        "addedUsing": "download"
+
+                    let folderToDelete = [];
+                    if(metaData.appIcon){
+                        const appIconFileName = path.basename(metaData.appIcon);
+                        await fileSDK.move(path.join('content', fileName, metaData.appIcon), path.join('content', fileName, appIconFileName))
+                        folderToDelete.push(path.join('content', fileName, path.dirname(metaData.appIcon)))
+                        metaData.appIcon = `content/${fileName}/${appIconFileName}`;
                     }
-                    metaData.appIcon = metaData.appIcon ? `content/${fileName}/${metaData.appIcon}` : metaData.appIcon;
+                    if(metaData.artifactUrl && path.extname(metaData.artifactUrl) && path.extname(metaData.artifactUrl) !== '.zip'){
+                        const artifactName = path.basename(metaData.artifactUrl);
+                        await fileSDK.move(path.join('content', fileName, metaData.artifactUrl), path.join('content', fileName, artifactName))
+                        folderToDelete.push(path.join('content', fileName, path.dirname(metaData.artifactUrl)))
+                    } else if(metaData.artifactUrl && path.extname(metaData.artifactUrl) && path.extname(metaData.artifactUrl) === '.zip'){
+                        folderToDelete.push(path.join('content', fileName, path.dirname(metaData.artifactUrl)))
+                    }
+                    folderToDelete = _.union(folderToDelete);
+                    for(const path of folderToDelete){
+                        await fileSDK.remove(path);
+                    }
+                    const desktopAppMetadata: IDesktopAppMetadata = {
+                        "addedUsing": IAddedUsingType.download,
+                        "createdOn": Date.now(),
+                        "updatedOn": Date.now()
+                    }
+                    metaData.desktopAppMetadata = desktopAppMetadata;
                     //insert metadata to content database
                     // TODO: before insertion check if the first object is type of collection then prepare the collection and insert 
 
@@ -89,7 +117,7 @@ export const addContentListener = (pluginId) => {
                     // update the status to indexed
                 } catch (error) {
                     failFlagCount++
-                    logger.error(`while content is extracted ${data.id}, ${error}`)
+                    logger.error(`Received error while content is extracted for id: ${data.id} and and err.message: ${error.message}`)
                 }
             }
             if (failFlagCount === data.files.length) {
@@ -98,7 +126,7 @@ export const addContentListener = (pluginId) => {
                 await dbSDK.update(dbName, _id, { status: CONTENT_DOWNLOAD_STATUS.Indexed, updatedOn: Date.now() })
             }
         } catch (error) {
-            logger.error(`while listening to content complete event ${data.id}, ${error}`)
+            logger.error(`Received error while listening to content complete event for id: ${data.id} and err.message: ${error.message}`)
         }
     })
 
@@ -112,9 +140,24 @@ export const addContentListener = (pluginId) => {
             let _id = docs[0]["_id"];
             await dbSDK.update(dbName, _id, { status: CONTENT_DOWNLOAD_STATUS.Failed, updatedOn: Date.now() })
         } catch (error) {
-            logger.error(`While updating the failed status in content download DB ${error}`);
+            logger.error(`Received error while updating the failed status in content download DB and err.message: ${error.message}`);
         }
     })
+}
+
+export const deleteContentFolder = async (file, fileSDK) => {
+    const contentData = await dbSDK.get('content', file.id);
+    if (_.get(contentData, 'desktopAppMetadata.ecarFile')) {
+        const toBeDeletedFileName = path.basename(_.get(contentData, 'desktopAppMetadata.ecarFile'), '.ecar');
+
+        // Todo: Should be removed when importing logic changes and the data gets saved with the identifier
+        if (file.id !== toBeDeletedFileName) {
+            await fileSDK.remove(path.join('ecars', _.get(contentData, 'desktopAppMetadata.ecarFile')));
+        }
+
+        await fileSDK.remove((path.join('content', toBeDeletedFileName)));
+    }
+    return true;
 }
 
 export const createHierarchy = (items: any[], parent: any, tree?: any[]): any => {
@@ -172,7 +215,7 @@ export const reconciliation = async (pluginId) => {
         }
 
     } catch (error) {
-        logger.error(`while running reconciliation in plugin for content update sync ${error}`)
+        logger.error(`Received error while running reconciliation in plugin for content update sync and err.message: ${error.message}`)
     }
 
 

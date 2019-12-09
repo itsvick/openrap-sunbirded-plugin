@@ -1,5 +1,5 @@
 {
-    "type": "couchdb",
+    "type": "pouchdb",
     "config": {},
     "databases": [
         {
@@ -16,6 +16,14 @@
                         ]
                     },
                     "name": "search"
+                },
+                {
+                    "index": {
+                        "fields": [
+                            "desktopAppMetadata.updatedOn"
+                        ]
+                    },
+                    "name": "sort_updatedOn_index"
                 }
             ]
         },
@@ -30,6 +38,9 @@
                     }
                 }
             ]
+        },
+        {
+            "name": "faqs"
         },
         {
             "name": "resource_bundle",
@@ -92,12 +103,6 @@
             ]
         },
         {
-            "name": "telemetry"
-        },
-        {
-            "name": "config"
-        },
-        {
             "name": "content_download",
             "indexes": [
                 {
@@ -108,8 +113,58 @@
                     },
                     "type": "json",
                     "name": "created_on_sort_index"
+                },
+                {
+                    "index": {
+                        "fields": [
+                            "createdOn",
+                            "_id",
+                            "downloadId",
+                            "status"
+                        ]
+                    },
+                    "type": "json",
+                    "name": "search"
                 }
             ]
+        },
+        {
+            "name": "content_manager",
+            "indexes": [
+                {
+                    "index": {
+                        "fields": [
+                            "status"
+                        ],
+                        "ddoc": "status",
+                        "name": "status"
+                    }
+                },
+                {
+                    "index": {
+                        "fields": [
+                            "type",
+                            "status",
+                            "updatedOn"
+                        ],
+                        "ddoc": "type_status_updatedOn",
+                        "name": "type_status_updatedOn"
+                    }
+                },
+                {
+                    "index": {
+                        "fields": [
+                            "type",
+                            "status"
+                        ],
+                        "ddoc": "type_status",
+                        "name": "type_status"
+                    }
+                }
+            ]
+        },
+        {
+            "name": "location"
         }
     ]
 }

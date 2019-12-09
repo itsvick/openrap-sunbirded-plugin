@@ -1,0 +1,18 @@
+{
+    "defaultSeverity": "error",
+    "extends": [
+        "tslint:recommended"
+    ],
+    "linterOptions": {
+        "exclude": [
+            "dist/**/*.ts",
+            "test_data/**/*.ts",
+            "test_data/*.ts"
+        ]
+    },
+    "jsRules": {},
+    "rules": {
+        "object-literal-sort-keys": false 
+    },
+    "rulesDirectory": []
+}

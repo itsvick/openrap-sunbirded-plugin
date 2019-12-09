@@ -1,46 +1,60 @@
 import { Inject } from "typescript-ioc";
 import DatabaseSDK from "../../sdk/database";
-import * as _ from 'lodash';
+import * as _ from "lodash";
 import config from "../../config";
-import Response from '../../utils/response';
+import Response from "../../utils/response";
 import { Manifest } from "@project-sunbird/ext-framework-server/models";
-import * as Busboy from 'busboy';
-import * as fs from 'fs';
-import { logger } from '@project-sunbird/ext-framework-server/logger';
-import * as path from 'path';
-import ContentManager from "../../manager/ContentManager";
-import * as uuid from 'uuid';
-import Hashids from 'hashids';
+import * as Busboy from "busboy";
+import * as fs from "fs";
+import { logger } from "@project-sunbird/ext-framework-server/logger";
+import * as path from "path";
+import { ContentImportManager } from "../../manager/contentImportManager"
+import * as uuid from "uuid";
+import Hashids from "hashids";
 import { containerAPI } from "OpenRAP/dist/api";
+import * as TreeModel from "tree-model";
+import { HTTPService } from "@project-sunbird/ext-framework-server/services";
+import { ExportContent } from "../../manager/contentExportManager"
 
+export enum DOWNLOAD_STATUS {
+    SUBMITTED = "DOWNLOADING",
+    COMPLETED = "DOWNLOADING",
+    EXTRACTED = "DOWNLOADING",
+    INDEXED = "DOWNLOADED",
+    FAILED = "FAILED"
+}
+const INTERVAL_TO_CHECKUPDATE = 1
 export default class Content {
-
     private contentsFilesPath: string = 'content';
     private ecarsFolderPath: string = 'ecars';
     @Inject
     private databaseSdk: DatabaseSDK;
 
     @Inject
-    private contentManager: ContentManager;
+    private contentImportManager: ContentImportManager;
 
     private fileSDK;
 
     constructor(manifest: Manifest) {
         this.databaseSdk.initialize(manifest.id);
         this.fileSDK = containerAPI.getFileSDKInstance(manifest.id);
-        this.contentManager.initialize(manifest.id,
+        this.contentImportManager.initialize(
+            manifest.id,
             this.fileSDK.getAbsPath(this.contentsFilesPath),
-            this.fileSDK.getAbsPath(this.ecarsFolderPath));
+            this.fileSDK.getAbsPath(this.ecarsFolderPath)
+        );
     }
 
-    searchInDB(filters) {
+    searchInDB(filters, reqId, sort?) {
+        logger.debug(`ReqId = "${reqId}": Contents are searching in ContentDb with given filters`)
         let modifiedFilters: Object = _.mapValues(filters, (v, k) => {
             if (k !== 'query') return ({ '$in': v })
         });
         delete modifiedFilters['query'];
+        logger.info(`ReqId = "${reqId}": Deleted 'query' in modifiedFilters`);
         if (_.get(filters, 'query')) {
             modifiedFilters['name'] = {
-                "$regex": `(?i)${_.get(filters, 'query')}`
+                "$regex": new RegExp(_.get(filters, 'query'), 'i')
             }
         }
         modifiedFilters['visibility'] = 'Default';
@@ -48,202 +62,335 @@ export default class Content {
             selector: modifiedFilters,
             limit: parseInt(config.get('CONTENT_SEARCH_LIMIT'), 10)
         }
+        if (sort) {
+            logger.info(`ReqId = "${reqId}": Sort is present. Sorting the contents based on given sort properties`)
+            for (let sortFields of Object.keys(sort)) {
+                dbFilters.selector[sortFields] = {
+                    "$gt": null
+                }
+            }
+            dbFilters['sort'] = [sort];
+        }
+        logger.debug(`ReqId = "${reqId}": Find the contents in ContentDb with the given filters`)
         return this.databaseSdk.find('content', dbFilters);
     }
 
     get(req: any, res: any): any {
-        let id = req.params.id;
-        this.databaseSdk.get('content', id)
-            .then(data => {
-                data = _.omit(data, ['_id', '_rev'])
-                let resObj = {
-                    content: data
-                }
-                return res.send(Response.success("api.content.read", resObj));
-            })
-            .catch(err => {
-
-                if (err.statusCode === 404) {
-                    res.status(404)
-                    return res.send(Response.error("api.content.read", 404));
+        (async () => {
+            try {
+                logger.debug(`ReqId = "${req.headers['X-msgid']}": Called Content get method to get Content: ${req.params.id} `);
+                let id = req.params.id;
+                logger.debug(`ReqId = "${req.headers['X-msgid']}": Get Content: ${id} from ContentDB`);
+                let content = await this.databaseSdk.get('content', id);
+                content = _.omit(content, ['_id', '_rev']);
+                let resObj = {};
+                logger.debug(`ReqId = "${req.headers['X-msgid']}": Call isUpdateRequired()`)
+                if (this.isUpdateRequired(content, req)) {
+                    logger.debug(`ReqId = "${req.headers['X-msgid']}": Call checkForUpdate() to check whether update is required for content: `, _.get(content, 'identifier'));
+                    content = await this.checkForUpdates(content, req)
+                    resObj['content'] = content;
+                    return res.send(Response.success('api.content.read', resObj, req));
                 } else {
-                    let statusCode = err.statusCode || 500;
-                    res.status(statusCode)
-                    return res.send(Response.error("api.content.read", statusCode));
+                    resObj['content'] = content;
+                    return res.send(Response.success('api.content.read', resObj, req));
                 }
-            });
+            } catch (error) {
+                logger.error(
+                    `ReqId = "${req.headers['X-msgid']}": Received error while getting the data from content database and err.message: ${error}`
+                );
+                if (error.status === 404) {
+                    res.status(404);
+                    return res.send(Response.error('api.content.read', 404));
+                } else {
+                    let status = error.status || 500;
+                    res.status(status);
+                    return res.send(Response.error('api.content.read', status));
+                }
+            }
+        })()
+
     }
 
     search(req: any, res: any): any {
+        logger.debug(`ReqId = "${req.headers['X-msgid']}": Called content search method`);
         let reqBody = req.body;
         let pageReqFilter = _.get(reqBody, 'request.filters');
         let contentSearchFields = config.get('CONTENT_SEARCH_FIELDS').split(',');
-
+        logger.info(`ReqId = "${req.headers['X-msgid']}": picked filters from the request`);
         let filters = _.pick(pageReqFilter, contentSearchFields);
-        filters = _.mapValues(filters, function (v) { return _.isString(v) ? [v] : v; });
+        filters = _.mapValues(filters, function (v) {
+            return _.isString(v) ? [v] : v;
+        });
         let query = _.get(reqBody, 'request.query');
         if (!_.isEmpty(query)) {
             filters.query = query;
         }
-        this.searchInDB(filters).then(data => {
-            data = _.map(data.docs, doc => _.omit(doc, ['_id', '_rev']))
-            let resObj = {};
-            if (data.length === 0) {
-                resObj = {
-                    content: [],
-                    count: 0
-                }
-            } else {
-                resObj = {
-                    content: data,
-                    count: data.length
-                }
-            }
-
-            return res.send(Response.success("api.content.search", resObj));
-        }).catch(err => {
-            console.log(err)
-            if (err.statusCode === 404) {
-                res.status(404)
-                return res.send(Response.error("api.content.search", 404));
-            } else {
-                let statusCode = err.statusCode || 500;
-                res.status(statusCode)
-                return res.send(Response.error("api.content.search", statusCode));
-            }
-        });
-    }
-
-    import(req: any, res: any): any {
-        let downloadsPath = this.fileSDK.getAbsPath(this.ecarsFolderPath);
-        let busboy = new Busboy({ headers: req.headers });
-
-        busboy.on('file', (fieldname, file, filename, encoding, mimetype) => {
-            // since file name's are having spaces we will generate uniq string as filename 
-            let hash = new Hashids(uuid.v4(), 25);
-            let uniqFileName = hash.encode(1).toLowerCase() + path.extname(filename);
-            let filePath = path.join(downloadsPath, uniqFileName);
-            req.fileName = uniqFileName;
-            req.filePath = filePath;
-            logger.info(`Uploading of file  ${filePath} started`);
-            file.pipe(fs.createWriteStream(filePath));
-        });
-        busboy.on('finish', () => {
-            logger.info(`Upload complete of the file ${req.filePath}`);
-            this.contentManager.startImport(req.fileName).then(data => {
-                logger.info(`File extraction successful for file ${req.filePath}`);
-                res.send({ success: true })
-            }).catch(error => {
-                logger.error(`Error while file extraction  of file ${req.filePath}`, error);
-                res.send({ error: true })
-            })
-
-        });
-
-        return req.pipe(busboy);
-    }
-
-    export(req: any, res: any): any {
-        (async () => {
-            try {
-                let id = req.params.id;
-                // get the data from content db     
-                let content = await this.databaseSdk.get('content', id);
-                if (content.mimeType !== "application/vnd.ekstep.content-collection") {
-                    let filePath = this.fileSDK.getAbsPath(path.join("ecars", content.desktopAppMetadata.ecarFile))
-                    fs.stat(filePath, async (err) => {
-                        if (err) {
-                            logger.error(`ecar file not available while exporting for content ${id} ${err}`)
-                            res.status(500)
-                            return res.send(Response.error("api.content.export", 500))
-                        } else {
-                            await this.fileSDK.copy(path.join('ecars', content.desktopAppMetadata.ecarFile), path.join('temp', `${content.name}.ecar`));
-                            this.cleanUpExports(path.join('temp', `${content.name}.ecar`));
-                            res.status(200)
-                            res.send(Response.success(`api.content.export`, {
-                                response: {
-                                    url: `${req.protocol}://${req.get('host')}/temp/${content.name}.ecar`
-                                }
-                            }));
-                        }
-                    })
-
+        logger.info(`ReqId = "${req.headers['X-msgid']}": Got query from the request`);
+        logger.debug(`ReqId = "${req.headers['X-msgid']}": Searching Content in Db with given filters`)
+        this.searchInDB(filters, req.headers['X-msgid'])
+            .then(data => {
+                data = _.map(data.docs, doc => _.omit(doc, ['_id', '_rev']));
+                let resObj = {};
+                if (data.length === 0) {
+                    logger.info(`ReqId = "${req.headers['X-msgid']}": Contents NOT found in DB`);
+                    resObj = {
+                        content: [],
+                        count: 0
+                    };
                 } else {
-                    //     - get the spine ecar
-                    let collectionEcarPath = path.join("ecars", content.desktopAppMetadata.ecarFile);
-                    //     - unzip to temp folder
-                    await this.fileSDK.mkdir('temp')
-                    let collectionFolderPath = await this.fileSDK.unzip(collectionEcarPath, 'temp', true);
-                    let manifest = await this.fileSDK.readJSON(path.join(collectionFolderPath, "manifest.json"))
-                    // - read all childNodes and get non-collection items
-                    let items = _.get(manifest, 'archive.items');
-                    let parent: any | undefined = _.find(items, (i) => {
-                        return (i.mimeType === 'application/vnd.ekstep.content-collection' && i.visibility === 'Default')
-                    });
-                    const childNodes = _.get(parent, 'childNodes');
-                    let collectionFolderRelativePath = path.join('temp', path.parse(collectionEcarPath).name);
+                    logger.info(`ReqId = "${req.headers['X-msgid']}": Contents = ${data.length} found in DB`)
+                    resObj = {
+                        content: data,
+                        count: data.length
+                    };
+                }
 
-                    if (!_.isEmpty(childNodes)) {
-                        let { docs: childContents = [] } = await this.databaseSdk.find('content', {
-                            selector: {
-                                "$and": [
-                                    {
-                                        "_id": {
-                                            "$in": childNodes
-                                        }
-                                    },
-                                    {
-                                        "mimeType": {
-                                            "$nin": ["application/vnd.ekstep.content-collection"]
-                                        }
-                                    }
-                                ]
+                return res.send(Response.success('api.content.search', resObj, req));
+            })
+            .catch(err => {
+                console.log(err);
+                logger.error(
+                    `ReqId = "${req.headers['X-msgid']}":  Received error while searching content - err.message: ${
+                    err.message
+                    } ${err}`
+                );
+                if (err.status === 404) {
+                    res.status(404);
+                    return res.send(Response.error('api.content.search', 404));
+                } else {
+                    let status = err.status || 500;
+                    res.status(status);
+                    return res.send(Response.error('api.content.search', status));
+                }
+            });
+    }
+
+    async import(req: any, res: any) {
+        const ecarFilePaths = req.body
+        if (!ecarFilePaths) {
+            return res.status(400).send(Response.error(`api.content.import`, 400, "MISSING_ECAR_PATH"));
+        }
+        this.contentImportManager.registerImportJob(ecarFilePaths).then(jobIds => {
+            res.send(Response.success('api.content.import', {
+                importedJobIds: jobIds
+            }, req))
+        }).catch(err => {
+            res.status(500);
+            res.send(Response.error(`api.content.import`, 400, err.errMessage || err.message, err.code))
+        });
+    }
+    async pauseImport(req: any, res: any) {
+        this.contentImportManager.pauseImport(req.params.importId).then(jobIds => {
+            res.send(Response.success('api.content.import', {
+                jobIds
+            }, req))
+        }).catch(err => {
+            res.status(500);
+            res.send(Response.error(`api.content.import`, 400, err.message))
+        });
+    }
+    async resumeImport(req: any, res: any) {
+        this.contentImportManager.resumeImport(req.params.importId).then(jobIds => {
+            res.send(Response.success('api.content.import', {
+                jobIds
+            }, req))
+        }).catch(err => {
+            res.status(500);
+            res.send(Response.error(`api.content.import`, 400, err.message))
+        });;
+    }
+    async cancelImport(req: any, res: any) {
+        await this.contentImportManager.cancelImport(req.params.importId).then(jobIds => {
+            res.send(Response.success('api.content.import', {
+                jobIds
+            }, req))
+        }).catch(err => {
+            res.status(500);
+            res.send(Response.error(`api.content.import`, 400, err.message))
+        });;
+    }
+
+    async export(req: any, res: any): Promise<any> {
+        let id = req.params.id;
+        let destFolder = req.query.destFolder;
+        logger.debug(`ReqId = "${req.headers['X-msgid']}": Get Content: ${id} from ContentDB`)
+        let content = await this.databaseSdk.get('content', id);
+        let childNode = [];
+        if (content.mimeType === 'application/vnd.ekstep.content-collection') {
+            let dbChildResponse = await this.databaseSdk.find('content',
+                {
+                    selector: {
+                        $and: [
+                            {
+                                _id: {
+                                    $in: content.childNodes
+                                }
+                            },
+                            {
+                                mimeType: {
+                                    $nin: ['application/vnd.ekstep.content-collection']
+                                }
                             }
-                        })
-                        for (let childContent of childContents) {
-                            let ecarPath = _.get(childContent, 'desktopAppMetadata.ecarFile');
-                            if (!_.isEmpty(ecarPath)) {
-                                let contentFolderPath = path.join(collectionFolderRelativePath, childContent.identifier);
-                                await this.fileSDK.remove(contentFolderPath).catch(error => {
-                                    logger.error(`while deleting the folder in collection ${contentFolderPath} `)
-                                });
-                                await this.fileSDK.mkdir(contentFolderPath)
-                                await this.fileSDK.unzip(path.join('ecars', ecarPath), contentFolderPath, false);
+                        ]
+                    }
+                }
+            );
+            childNode = dbChildResponse.docs;
+        }
+        const contentExport = new ExportContent(destFolder, content, childNode);
+        contentExport.export((err, data) => {
+            if (err) {
+                res.status(500);
+                return res.send(Response.error('api.content.export', 500));
+            }
+            res.status(200);
+            res.send(Response.success(`api.content.export`, {
+                    response: {
+                        ecarFilePath: data.ecarFilePath
+                    }
+                }, req));
+        });
+    }
+
+    /* This method converts the buffer data to json and if any error will catch and return the buffer data */
+
+    convertBufferToJson(proxyResData, req) {
+        logger.debug(`ReqId = "${req.headers['X-msgid']}": Converting Bufferdata to json`)
+        let proxyData;
+        try {
+            proxyData = JSON.parse(proxyResData.toString('utf8'));
+        } catch (e) {
+            console.log(e);
+            logger.error(
+                `ReqId = "${req.headers['X-msgid']}": Received error while parsing the Bufferdata to json: ${e}`
+            );
+            return proxyResData;
+        }
+        logger.info(`ReqId = "${req.headers['X-msgid']}": Succesfully converted Bufferdata to json`)
+        return proxyData;
+    }
+
+    /*This method is to whether content is present and to store all the contents in all page sections to one array */
+
+    decorateSections(sections, reqId) {
+        logger.debug(`ReqId = "${reqId}": Called decorateSections to decorate content`)
+        let contents = [];
+        logger.info(`ReqId = "${reqId}": Fetching all the contentId's from all the sections into an array`);
+        for (let section of sections) {
+            if (!_.isEmpty(section.contents)) {
+                for (let content of section.contents) {
+                    contents.push(content);
+                }
+            }
+        }
+        logger.debug(`ReqId = "${reqId}": Calling decorateContent from decoratesections`)
+        return this.decorateContentWithProperty(contents, reqId);
+    }
+
+    /* This method is to check contents are present in DB */
+
+    async decorateContentWithProperty(contents, reqId) {
+        logger.debug(`ReqId = "${reqId}": Called decorateContent to decorate content`)
+        try {
+            let listOfContentIds = [];
+            logger.info(`ReqId = "${reqId}": Pushing all the contentId's to an Array for all the requested Contents`)
+            for (let content of contents) {
+                listOfContentIds.push(content.identifier);
+            }
+            logger.debug(`ReqId = "${reqId}": Search downloaded and downloading  contents in DB using content Id's`)
+            await this.searchDownloadingContent(listOfContentIds, reqId)
+                .then(data => {
+                    logger.info(`ReqId = "${reqId}": Found the ${data.docs.length} contents in Content_Download Db`)
+                    for (let doc of data.docs) {
+                        for (let content of contents) {
+                            if (doc.contentId === content.identifier) {
+                                content.downloadStatus = DOWNLOAD_STATUS[doc.status];
                             }
                         }
                     }
-
-                    // - Zip the spine_folder and download  
-                    await this.fileSDK.zip(collectionFolderRelativePath, 'temp', `${parent.name}.ecar`);
-                    this.cleanUpExports(path.join('temp', `${parent.name}.ecar`));
-                    res.status(200)
-                    res.send(Response.success(`api.content.export`, {
-                        response: {
-                            url: req.protocol + '://' + req.get('host') + '/temp/' + `${parent.name}.ecar`
-                        }
-                    }));
-                }
-            } catch (error) {
-                logger.error(`while processing the content  export ${req.params.id} ${error} `);
-                res.status(500)
-                return res.send(Response.error("api.content.export", 500))
-            }
-        })()
+                })
+                .catch(err => {
+                    console.log(err);
+                    logger.error(
+                        `ReqId = "${reqId}": Received error while getting the data from database and err.message: ${
+                        err.message
+                        } ${err}`
+                    );
+                    return contents;
+                });
+        } catch (err) {
+            console.log(err);
+            logger.error(`ReqId = "${reqId}": Received  error err.message: ${err.message} ${err}`);
+            return contents;
+        }
+        return contents;
     }
 
-    /*
-        This method will clear the exported files after 5 min from the time the file is created
-    */
-    private cleanUpExports(file: string) {
-        let interval = setInterval(() => {
-            try {
-                this.fileSDK.remove(file);
-                clearInterval(interval);
-            } catch (error) {
-                logger.error(`while deleting the ${file} after export ${error.message} `)
-                clearInterval(interval);
+    /* This method is to check dialcode contents present in DB */
+
+    decorateDialCodeContents(content, reqId) {
+        logger.debug(`ReqId = "${reqId}": Decorating Dial Code Contents`);
+        const model = new TreeModel();
+        let treeModel;
+        treeModel = model.parse(content);
+        let contents = [];
+        contents.push(content);
+        logger.info(`ReqId = "${reqId}": walking through all the nodes and pushing all the child nodes to an array`);
+        treeModel.walk(node => {
+            if (node.model.mimeType !== 'application/vnd.ekstep.content-collection') {
+                contents.push(node.model);
             }
-        }, 300000)
+        });
+        logger.debug(`ReqId = "${reqId}": Calling decorateContent from decoratedialcode`)
+        return this.decorateContentWithProperty(contents, reqId);
+    }
+
+    /* This method is to search contents for download status in database  */
+
+    searchDownloadingContent(contents, reqId) {
+        logger.debug(`ReqId = "${reqId}": searchDownloadingContent method is called`);
+        let dbFilters = {
+            "selector": {
+                "contentId": {
+                    "$in": contents
+                }
+            }
+        }
+        logger.info(`ReqId = "${reqId}": finding downloading, downloaded or failed contents in database`)
+        return this.databaseSdk.find('content_download', dbFilters)
+    }
+
+    isUpdateRequired(content, req) {
+        logger.debug(`ReqId = "${req.headers['X-msgid']}": Called isUpdateRequired()`);
+
+        if (_.get(content, 'desktopAppMetadata.updateAvailable')) {
+            logger.info(`ReqId = "${req.headers['X-msgid']}": updateAvailble for content and Don't call API`);
+            return false;
+        } else if (_.get(content, 'desktopAppMetadata.lastUpdateCheckedOn')) {
+            logger.info(`ReqId = "${req.headers['X-msgid']}": checking when is the last updatechecked on`, _.get(content, 'desktopAppMetadata.lastUpdateCheckedOn'));
+            return ((Date.now() - _.get(content, 'desktopAppMetadata.lastUpdateCheckedOn')) / 3600000) > INTERVAL_TO_CHECKUPDATE ? true : false;
+        }
+        logger.info(`ReqId = "${req.headers['X-msgid']}": update is not available for content and call API`);
+        return true;
+    }
+
+
+    checkForUpdates(offlineContent, req) {
+        logger.debug(`ReqId = "${req.headers['X-msgid']}": calling api to check whether content: ${_.get(offlineContent, 'idenitifier')} is updated`);
+        return new Promise(async (resolve, reject) => {
+            try {
+                let onlineContent = await HTTPService.get(`${process.env.APP_BASE_URL}/api/content/v1/read/${offlineContent.identifier}?field=pkgVersion`, {}).toPromise();
+                if (_.get(offlineContent, 'pkgVersion') < _.get(onlineContent, 'data.result.content.pkgVersion')) {
+                    offlineContent.desktopAppMetadata.updateAvailable = true;
+                }
+                offlineContent.desktopAppMetadata.lastUpdateCheckedOn = Date.now();
+                await this.databaseSdk.update('content', offlineContent.identifier, offlineContent);
+                resolve(offlineContent);
+            } catch (err) {
+                logger.error(`ReqId = "${req.headers['X-msgid']}": Error occured while checking content update : ${err}`);
+                resolve(offlineContent);
+            }
+        })
     }
 
 }
