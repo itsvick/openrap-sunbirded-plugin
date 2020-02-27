@@ -13,9 +13,13 @@ import uuid = require("uuid");
 const ContentReadUrl = `${process.env.APP_BASE_URL}/api/content/v1/read`;
 const ContentSearchUrl = `${process.env.APP_BASE_URL}/api/content/v1/search`;
 const DefaultRequestOptions = { headers: { "Content-Type": "application/json" } };
+import * as os from "os";
+import { frameworkAPI } from "@project-sunbird/ext-framework-server/api";
 @Singleton
 export class ContentDownloadManager {
   @Inject private dbSDK: DatabaseSDK;
+  @Inject private fileSDK;
+  private settingSDK;
   private systemQueue: ISystemQueueInstance;
   private systemSDK;
   public async initialize() {
@@ -23,6 +27,8 @@ export class ContentDownloadManager {
     this.systemQueue.register(ContentDownloader.taskType, ContentDownloader);
     this.dbSDK.initialize(manifest.id);
     this.systemSDK = containerAPI.getSystemSDKInstance(manifest.id);
+    this.settingSDK = containerAPI.getSettingSDKInstance(manifest.id);
+    // this.fileSDK = containerAPI.getFileSDKInstance(manifest.id);
   }
   public async update(req, res) {
     const contentId = req.params.id;
@@ -33,7 +39,7 @@ export class ContentDownloadManager {
       const dbContentDetails = await this.dbSDK.get("content", contentId);
       const apiContentResponse = await HTTPService.get(`${ContentReadUrl}/${contentId}`, {}).toPromise();
       const apiContentDetail = apiContentResponse.data.result.content;
-      if(apiContentDetail.pkgVersion <= dbContentDetails.pkgVersion){
+      if (apiContentDetail.pkgVersion <= dbContentDetails.pkgVersion) {
         logger.debug(`${reqId} Content update not available for contentId: ${contentId} with parentId: ${parentId}`, apiContentDetail.pkgVersion, dbContentDetails.pkgVersion);
         res.status(400);
         return res.send(Response.error("api.content.update", 400, "Update not available"));
@@ -50,7 +56,7 @@ export class ContentDownloadManager {
         },
       };
       logger.debug(`${reqId} Content mimeType: ${apiContentDetail.mimeType}`);
-  
+
       if (apiContentDetail.mimeType === "application/vnd.ekstep.content-collection") {
         logger.debug(`${reqId} Content childNodes: ${apiContentDetail.childNodes}`);
         const childNodeDetailFromApi = await this.getContentChildNodeDetailsFromApi(apiContentDetail.childNodes);
@@ -85,9 +91,9 @@ export class ContentDownloadManager {
       }
       await this.checkDiskSpaceAvailability(contentSize, true);
       let queueMetaData = apiContentDetail;
-      if(parentId){ // use parent name, mimeType, identifier in queue
+      if (parentId) { // use parent name, mimeType, identifier in queue
         const dbParentDetails = await this.dbSDK.get("content", parentId);
-        if(!dbParentDetails){
+        if (!dbParentDetails) {
           throw "PARENT_NOT_DOWNLOADED";
         }
         queueMetaData = dbParentDetails;
@@ -120,6 +126,37 @@ export class ContentDownloadManager {
     }
   }
   public async download(req, res) {
+    // console.log('=============================-------------------==================');
+    // // console.log('ABSPath', this.fileSDK.getAbsPath(''));
+    // const hardDiskInfo = await this.systemSDK.getHardDiskInfo();
+    // console.log("hardDiskInfo=================----------->>>>>", hardDiskInfo);
+    // try {
+    //   const messageBoxResponse = await HTTPService.get(`http://localhost:${process.env.APPLICATION_PORT}/dialog/message-box`, {}).toPromise();
+    //   console.log("messageBox- buttonClickIndex", messageBoxResponse.data.buttonClickIndex);
+
+    //   if (_.get(messageBoxResponse, 'data.buttonClickIndex') && messageBoxResponse.data.buttonClickIndex === 1) {
+    //     const locationResponse = await HTTPService.get(`http://localhost:${process.env.APPLICATION_PORT}/dialog/content/location`, {}).toPromise();
+    //     console.log('locationResponse', locationResponse.data);
+
+    //   }
+    //   console.log("herere------");
+    // } catch (error) {
+    //   console.log("=====================================================================");
+    //   console.log("error", error);
+    // }
+
+    // low disk, and got new location "/home/ttpllt44/Videos"
+    // save content paths in the setting SDK,
+    try {
+
+      const contentLocation: any = await this.settingSDK.get("content_storage_location");
+      console.log("settingSDK response", contentLocation);
+      this.fileSDK = containerAPI.getFileSDKInstance(manifest.id);
+      frameworkAPI.registerStaticRoute(this.fileSDK.getAbsPath("content", true), "/content");
+    } catch (error) {
+      console.log("error", error);
+    }
+
     const contentId = req.params.id;
     const reqId = req.headers["X-msgid"];
     logger.debug(`${reqId} Content download request called for contentId: ${contentId}`);
@@ -218,7 +255,7 @@ export class ContentDownloadManager {
       logger.error(`${reqId} Content download resume request failed`, error.message);
       const status = _.get(error, "status") || 500;
       res.status(status);
-      return res.send( Response.error("api.content.resume.download", status, _.get(error, "message"), _.get(error, "code")));
+      return res.send(Response.error("api.content.resume.download", status, _.get(error, "message"), _.get(error, "code")));
     }
   }
 
@@ -233,7 +270,7 @@ export class ContentDownloadManager {
       logger.error(`${reqId} Content download cancel request failed`, error.message);
       const status = _.get(error, "status") || 500;
       res.status(status);
-      return res.send( Response.error("api.content.cancel.download", status, _.get(error, "message"), _.get(error, "code")));
+      return res.send(Response.error("api.content.cancel.download", status, _.get(error, "message"), _.get(error, "code")));
     }
   }
 
@@ -248,7 +285,7 @@ export class ContentDownloadManager {
       logger.error(`${reqId} Content download retry request failed`, error.message);
       const status = _.get(error, "status") || 500;
       res.status(status);
-      return res.send( Response.error("api.content.retry.download", status,
+      return res.send(Response.error("api.content.retry.download", status,
         _.get(error, "message"), _.get(error, "code")));
     }
   }
@@ -293,12 +330,49 @@ export class ContentDownloadManager {
       .then((response) => _.get(response, "docs") || []);
   }
   private async checkDiskSpaceAvailability(zipSize, collection) {
-    const availableDiskSpace = await this.systemSDK.getHardDiskInfo()
-      .then(({ availableHarddisk }) => availableHarddisk - 3e+8); // keeping buffer of 300 mb, this can be configured);
-    if (!collection && (zipSize + (zipSize * 1.5) > availableDiskSpace)) {
-      throw { message: "Disk space is low, couldn't copy Ecar", code: "LOW_DISK_SPACE" };
-    } else if (zipSize * 1.5 > availableDiskSpace) {
-      throw { message: "Disk space is low, couldn't copy Ecar", code: "LOW_DISK_SPACE" };
+    const totalZipSize = collection ? (zipSize * 1.5) : (zipSize + (zipSize * 1.5));
+
+    const hardDiskInfo: any = await this.systemSDK.getHardDiskInfo();
+    console.log("hardDiskInfo=================----------->>>>>", hardDiskInfo);
+    // keeping buffer of 300 mb, this can be configured);
+    const availableDiskSpace = hardDiskInfo.availableHarddisk - 3e+8;
+
+    const contentResponse = await HTTPService.get(`${process.env.APP_BASE_URL}/dialog/telemetry/export`, {}).toPromise();
+    if (os.platform() === "win32") {
+      const getAvailableSpace = (drive: any) => drive.size - drive.used;
+      const currentContentPath = this.fileSDK.getAbsPath("") || "C:";
+      const drives: any[] = await this.systemSDK.getHardDiskDrives();
+      const selectedDrive = drives.find((driveInfo) => currentContentPath.startsWith(driveInfo.fs));
+      const availableDriveSpace = getAvailableSpace(selectedDrive);
+
+
+
+      if (totalZipSize > availableDriveSpace) {
+        // check for space in next drive
+        let index = 0;
+        let suggestedDrive;
+        while (index <= drives.length) {
+          if (totalZipSize < getAvailableSpace(drives[index])) {
+            suggestedDrive = drives[index].fsSize;
+            break;
+          } else if (drives.length) {
+            if (!collection && totalZipSize > availableDiskSpace) {
+              throw { message: "Disk space is low, couldn't copy Ecar", code: "LOW_DISK_SPACE" };
+            } else if (totalZipSize > availableDiskSpace) {
+              throw { message: "Disk space is low, couldn't copy Ecar", code: "LOW_DISK_SPACE" };
+            }
+          }
+          index++;
+        }
+
+
+      }
+    } else {
+      if (!collection && (zipSize + (zipSize * 1.5) > availableDiskSpace)) {
+        throw { message: "Disk space is low, couldn't copy Ecar", code: "LOW_DISK_SPACE" };
+      } else if (zipSize * 1.5 > availableDiskSpace) {
+        throw { message: "Disk space is low, couldn't copy Ecar", code: "LOW_DISK_SPACE" };
+      }
     }
   }
   private getAddedAndUpdatedContents(liveContents, localContents) {

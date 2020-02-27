@@ -16,7 +16,7 @@ import DatabaseSDK from "./sdk/database";
 import config from "./config";
 import { logger } from "@project-sunbird/ext-framework-server/logger";
 import { containerAPI } from "OpenRAP/dist/api";
-import  ContentDelete from "./controllers/content/contentDelete";
+import ContentDelete from "./controllers/content/contentDelete";
 import * as _ from "lodash";
 import { EventManager } from "@project-sunbird/ext-framework-server/managers/EventManager";
 
@@ -55,7 +55,24 @@ export class Server extends BaseServer {
       });
   }
   async initialize(manifest: Manifest) {
+
     //registerAcrossAllSDKS()
+
+    // try {
+    //   const contentLocation = await this.settingSDK.get(`content_storage_location`)
+    //   this.fileSDK = containerAPI.getFileSDKInstance(manifest.id,
+    //     contentLocation.location[contentLocation.location.length]);
+    //   console.log("contentLocation", contentLocation);
+    //   frameworkAPI.registerStaticRoute(
+    //     this.fileSDK.getAbsPath(this.contentFilesPath, true),
+    //     "/content"
+    //   );
+    //   // await this.fileSDK.mkdir(this.contentFilesPath);
+    // } catch (error) {
+    //   console.log('contentLocation Not found');
+    //   this.settingSDK.put(`content_storage_location`, ["/home/ttpllt44/Videos"]);
+    // }
+
     this.databaseSdk.initialize(manifest.id);
     this.contentDelete = new ContentDelete(manifest);
     frameworkAPI.registerStaticRoute(
@@ -74,10 +91,18 @@ export class Server extends BaseServer {
       path.join(__dirname, "..", "..", "public", "contentPlayer", "preview"),
       "/contentPlayer/preview"
     );
-    frameworkAPI.registerStaticRoute(
-      this.fileSDK.getAbsPath(this.contentFilesPath),
-      "/content"
-    );
+
+    setTimeout(() => {
+      frameworkAPI.registerStaticRoute(
+        path.join("/home/ttpllt44/Videos"),
+        "/videos"
+      );
+    }, 10000)
+    
+    // frameworkAPI.registerStaticRoute(
+    //   this.fileSDK.getAbsPath(this.contentFilesPath),
+    //   "/content"
+    // );
     frameworkAPI.registerStaticRoute(
       this.fileSDK.getAbsPath(this.ecarsFolderPath),
       "/ecars"
@@ -90,13 +115,25 @@ export class Server extends BaseServer {
       "/sunbird-plugins"
     );
     frameworkAPI.setStaticViewEngine("ejs");
+    try {
+      const contentLocation = await this.settingSDK.get(`content_storage_location`)
+      console.log("contentLocation", contentLocation);
+      frameworkAPI.registerStaticRoute(
+        this.fileSDK.getContentAbsPath(this.contentFilesPath, contentLocation.location[0]),
+        "/content"
+      );
+      await this.fileSDK.mkdir(this.contentFilesPath);
+    } catch (error) {
+      console.log('contentLocation Not found');
+      this.settingSDK.put(`content_storage_location`, ["/home/ttpllt44/Videos"]);
+    }
     const response = await this.settingSDK.get(`${process.env.APP_VERSION}_configured`)
-    .catch((err) => {
-      logger.info(`${manifest.id} not configured for version`, `${process.env.APP_VERSION}`, err);
-    });
+      .catch((err) => {
+        logger.info(`${manifest.id} not configured for version`, `${process.env.APP_VERSION}`, err);
+      });
     if (!response) {
       await this.insertConfig(manifest);    // insert meta data for app
-      this.settingSDK.put(`${process.env.APP_VERSION}_configured`, { dataInserted: true});
+      this.settingSDK.put(`${process.env.APP_VERSION}_configured`, { dataInserted: true });
       logger.info(`${manifest.id} configured for version ${process.env.APP_VERSION} and settingSdk updated`);
     } else {
       logger.info(`${manifest.id} configured for version ${process.env.APP_VERSION}, skipping configuration`);
@@ -109,7 +146,7 @@ export class Server extends BaseServer {
     };
     await containerAPI.register(manifest.id, pluginConfig);
 
-    await this.fileSDK.mkdir(this.contentFilesPath);
+    await this.fileSDK.mkdir(this.contentFilesPath, true);
     await this.fileSDK.mkdir(this.ecarsFolderPath);
     //- reIndex()
     //- reConfigure()
@@ -124,9 +161,9 @@ export class Server extends BaseServer {
     const form = new Form(manifest);
     const location = new Location(manifest);
     return Promise.all([organization.insert(), resourceBundle.insert(),
-      framework.insert(), faqs.insert(),
-      channel.insert(), form.insert(),
-      form.insert(), location.insert()]);
+    framework.insert(), faqs.insert(),
+    channel.insert(), form.insert(),
+    form.insert(), location.insert()]);
   }
 }
 
