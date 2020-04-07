@@ -21,6 +21,7 @@ export class ExportContent {
   private corruptContents = [];
   private startTime = Date.now();
   private cb;
+  private settingSDK = containerAPI.getSettingSDKInstance(manifest.id);
   constructor(private destFolder, private dbParentNode, private dbChildNodes) { }
   public async export(cb) {
     this.cb = cb;
@@ -29,6 +30,7 @@ export class ExportContent {
       this.ecarName = this.dbParentNode.name
       ? this.dbParentNode.name.replace(/[&\/\\#,+()$~%.!@%|"":*?<>{}]/g, "") : "Untitled content";
       logger.info("Export content mimeType", this.dbParentNode.mimeType);
+      await this.getContentBaseFolder(this.dbParentNode.identifier);
       if (this.dbParentNode.mimeType === "application/vnd.ekstep.content-collection") {
         this.parentManifest = await fileSDK.readJSON(path.join(this.contentBaseFolder, this.dbParentNode.identifier, "manifest.json"));
         this.dbParentNode = _.get(this.parentManifest, "archive.items[0]");
@@ -245,5 +247,30 @@ export class ExportContent {
       },
     };
     return Buffer.from(JSON.stringify(manifestData));
+  }
+
+  private async getContentBaseFolder(contentId: string) {
+
+    // if (os.platform() === "win32") {
+      try {
+        const locationList: any = await this.settingSDK.get(`content_storage_location`);
+        let i = 0;
+        while (_.get(locationList, "location.length") && i < locationList.location.length) {
+          const item = path.join(locationList.location[i], "content");
+          const folderPath = path.join(item, contentId);
+          if (fse.existsSync(folderPath)) {
+            this.contentBaseFolder = item;
+            break;
+          }
+          i++;
+        }
+
+        return this.contentBaseFolder;
+      } catch (error) {
+        throw new Error(error);
+      }
+    // } else {
+    // return filePath.match(regex) && !_.includes(this.queue, filePath);
+    // }
   }
 }

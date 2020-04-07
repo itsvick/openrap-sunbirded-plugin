@@ -1,6 +1,6 @@
-import * as  _ from "lodash";
 import { containerAPI } from "OpenRAP/dist/api";
 import * as os from "os";
+import ContentLocation from "../controllers/contentLocation";
 import { manifest } from "../manifest";
 const systemSDK = containerAPI.getSystemSDKInstance(manifest.id);
 const fileSDK = containerAPI.getFileSDKInstance(manifest.id);
@@ -11,10 +11,11 @@ export default class HardDiskInfo {
 
         if (os.platform() === "win32") {
             const fileSize: any = fsSize;
-            const getAvailableSpace = (drive: any) => drive.size - drive.used;
-            const currentContentPath = fileSDK.getAbsPath("") || "C:";
+            const contentLocation = new ContentLocation(manifest.id);
+            const contentDirPath = await contentLocation.get();
+            const currentContentPath = contentDirPath || "C:";
             const selectedDrive = fileSize.find((driveInfo) => currentContentPath.startsWith(driveInfo.fs));
-            const availableDriveSpace = getAvailableSpace(selectedDrive);
+            const availableDriveSpace = selectedDrive.size - selectedDrive.used;
 
             return availableDriveSpace - 5e+8; // keeping buffer of 500 mb, this can be configured
         } else {

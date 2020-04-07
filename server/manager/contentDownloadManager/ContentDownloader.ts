@@ -212,7 +212,7 @@ export class ContentDownloader implements ITaskExecuter {
     const zipHandler: any = await this.loadZipHandler(path.join(this.ecarBasePath, contentDetails.downloadId));
     await this.checkSpaceAvailability(path.join(this.ecarBasePath, contentDetails.downloadId), zipHandler);
     const entries = zipHandler.entries();
-    const contentPath = await this.contentLocation.getContentAbsPath();
+    const contentPath = await this.contentLocation.get();
     await this.fileSDK.mkdir(contentDetails.identifier, contentPath);
     for (const entry of _.values(entries) as any) {
       await this.extractZipEntry(zipHandler, entry.name,
@@ -237,7 +237,7 @@ export class ContentDownloader implements ITaskExecuter {
     return { itemsToDelete };
   }
   private async saveContentToDb(contentId: string, contentDetails: IContentDownloadList) {
-    const contentPath = await this.contentLocation.getContentAbsPath();
+    const contentPath = await this.contentLocation.get();
     const manifestJson = await this.fileSDK.readJSON(
       path.join(contentPath, contentDetails.identifier, "manifest.json"));
     const metaData: any = _.get(manifestJson, "archive.items[0]");

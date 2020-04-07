@@ -1,16 +1,8 @@
 import { frameworkAPI } from "@project-sunbird/ext-framework-server/api";
-import { Manifest } from "@project-sunbird/ext-framework-server/models";
-import { logger } from "@project-sunbird/logger";
-import { ClassLogger } from "@project-sunbird/logger/decorator";
+import * as  _ from "lodash";
 import { containerAPI } from "OpenRAP/dist/api";
 import * as path from "path";
-import Response from "./../utils/response";
 
-/*@ClassLogger({
-  logLevel: "debug",
-  logTime: true,
-
-})*/
 export default class ContentLocation {
   private fileSDK;
   private settingSDK;
@@ -18,8 +10,7 @@ export default class ContentLocation {
     this.fileSDK = containerAPI.getFileSDKInstance(manifestId);
     this.settingSDK = containerAPI.getSettingSDKInstance(manifestId);
   }
-  public async changeContentLocation(contentPath: string) {
-
+  public async set(contentPath: string) {
     try {
       const response: any = await this.settingSDK.get(`content_storage_location`);
       response.location.push(contentPath);
@@ -27,9 +18,10 @@ export default class ContentLocation {
       const status = await this.settingSDK.put(`content_storage_location`, contentLocation);
 
       if (status) {
-        setTimeout(() => {
-          frameworkAPI.registerStaticRoute(path.join(contentPath, "content"), "/content");
-        }, 1000);
+        frameworkAPI.registerStaticRoute(path.join(contentPath, "content"), "/content");
+        frameworkAPI.registerStaticRoute(path.join(contentPath, "content"), "/contentPlayer/preview/content");
+        frameworkAPI.registerStaticRoute(path.join(contentPath, "content"), "/contentPlayer/preview");
+        frameworkAPI.registerStaticRoute(path.join(contentPath, "content"), "/contentPlayer/preview/content/*/content-plugins");
         await this.fileSDK.mkdir("content", contentPath);
       }
 
@@ -39,12 +31,13 @@ export default class ContentLocation {
     }
   }
 
-  public async getContentAbsPath() {
+  public async get() {
     // if (os.platform() === "win32") {
     try {
-      const contentLocation: any = await this.settingSDK.get(`content_storage_location`);
-      if (contentLocation && contentLocation.location && contentLocation.location.length) {
-        return path.join(contentLocation.location[contentLocation.location.length - 1], "content");
+      const contentDirPath: any = await this.settingSDK.get(`content_storage_location`);
+
+      if (_.get(contentDirPath, "location.length")) {
+        return path.join(contentDirPath.location[contentDirPath.location.length - 1], "content");
       }
 
     } catch (error) {

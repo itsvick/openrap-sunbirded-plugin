@@ -17,7 +17,7 @@ let manifestJson;
 let contentImportData: ISystemQueue;
 const fileSDK = containerAPI.getFileSDKInstance(manifest.id);
 const pluginBasePath = fileSDK.getAbsPath("");
-const contentFolder = fileSDK.getAbsPath("content");
+let contentFolder = fileSDK.getAbsPath("content");
 const ecarFolder = fileSDK.getAbsPath("ecars");
 const systemSDK = containerAPI.getSystemSDKInstance(manifest.id);
 
@@ -39,6 +39,7 @@ const syncCloser = (initialProgress, percentage, totalSize = contentImportData.m
 
 const copyEcar = async () => {
   try {
+    // Need to show popup on minimum space availability
     const availableDiskSpace = await HardDiskInfo.getAvailableDiskSpace();
     process.send({ message: "LOG", logType: "info",
     logBody: [contentImportData._id, "Disk Space availability check",
@@ -75,7 +76,7 @@ const parseEcar = async () => {
     const ecarBasePath = path.join(ecarFolder, contentImportData._id + ".ecar");
     const contentBasePath = path.join(contentFolder, contentImportData._id); // temp path
     zipHandler = await loadZipHandler(ecarBasePath).catch(handelError("LOAD_ECAR"));
-    await fileSDK.mkdir(path.join("content", contentImportData._id));
+    await fileSDK.mkdir(contentImportData._id, contentFolder);
     zipEntries = zipHandler.entries();
     const manifestEntry = zipEntries["manifest.json"] || zipEntries["/manifest.json"];
     if (!manifestEntry) {
@@ -157,7 +158,7 @@ const extractEcar = async () => {
       }
       const contentBasePath = (collection && !parent) ?
         [contentImportData.metaData.contentId, content.identifier] : [content.identifier];
-      await fileSDK.mkdir(path.join("content", path.join(...contentBasePath)));
+      await fileSDK.mkdir(path.join(...contentBasePath), contentFolder);
       await extractZipEntry(content.identifier, contentBasePath, content.appIcon, syncFunc);
       await extractZipEntry(content.identifier, contentBasePath, "manifest.json", syncFunc);
       if (collection) {
@@ -180,7 +181,7 @@ const extractEcar = async () => {
         artifactToBeUnzippedSize += artifactExtracted.compressedSize;
         artifactToBeUnzipped.push({
           contentId: content.identifier,
-          src: path.join("content", ...contentBasePath, path.basename(artifactExtracted.name)),
+          src: path.join(contentFolder, ...contentBasePath, path.basename(artifactExtracted.name)),
           size: artifactExtracted.compressedSize,
         });
       } else {
@@ -203,7 +204,7 @@ const extractEcar = async () => {
       .catch(handelError("EXTRACT_ARTIFACTS")); // extract all zip artifacts
     process.send({ message: "LOG", logType: "info", logBody: [contentImportData._id, "artifacts unzipped"] });
     await removeFile(path.join("ecars", contentImportData._id + ".ecar")); // delete ecar folder
-    await removeFile(path.join("content", contentImportData._id)); // delete temp content folder which has manifest.json
+    await removeFile(contentImportData._id); // delete temp content folder which has manifest.json
     sendMessage(ImportSteps.extractEcar);
   } catch (err) {
     zipHandler.close();
@@ -212,7 +213,7 @@ const extractEcar = async () => {
 };
 
 const removeFile = (location) => {
-  return fileSDK.remove(location)
+  return fileSDK.remove(location, contentFolder)
     .catch((err) => process.send({ message: "LOG", logType: "error", logBody: [contentImportData._id, "error while deleting ecar folder", location] }));
 };
 
@@ -265,6 +266,10 @@ const sendMessage = (message: string, err?: ErrorObj) => {
 process.on("message", (data) => {
   if (_.includes([ImportSteps.copyEcar, ImportSteps.parseEcar, ImportSteps.extractEcar], data.message)) {
     contentImportData = data.contentImportData;
+
+    if (data.contentFolder) {
+      contentFolder = data.contentFolder;
+    }
   }
   if (data.message === ImportSteps.copyEcar) {
     copyEcar();
