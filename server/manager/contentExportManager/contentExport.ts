@@ -1,5 +1,6 @@
 import * as  _ from "lodash";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import * as fse from "fs-extra";
 import { manifest } from "../../manifest";
@@ -251,7 +252,7 @@ export class ExportContent {
 
   private async getContentBaseFolder(contentId: string) {
 
-    // if (os.platform() === "win32") {
+    if (os.platform() === "win32") {
       try {
         const locationList: any = await this.settingSDK.get(`content_storage_location`);
         let i = 0;
@@ -264,13 +265,9 @@ export class ExportContent {
           }
           i++;
         }
-
-        return this.contentBaseFolder;
       } catch (error) {
-        throw new Error(error);
+        logger.error("Got Error while exporting content", error);
       }
-    // } else {
-    // return filePath.match(regex) && !_.includes(this.queue, filePath);
-    // }
+    }
   }
 }

@@ -35,7 +35,6 @@ export class ContentDownloader implements ITaskExecuter {
   private downloadFailedCount = 0;
   private extractionFailedCount = 0;
   private downloadContentCount = 0;
-  private settingSDK = containerAPI.getSettingSDKInstance(manifest.id);
   private contentLocation = new ContentLocation(manifest.id);
   public async start(contentDownloadData: ISystemQueue, observer: Observer<ISystemQueue>) {
     this.databaseSdk.initialize(manifest.id);

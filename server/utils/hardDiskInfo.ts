@@ -3,7 +3,6 @@ import * as os from "os";
 import ContentLocation from "../controllers/contentLocation";
 import { manifest } from "../manifest";
 const systemSDK = containerAPI.getSystemSDKInstance(manifest.id);
-const fileSDK = containerAPI.getFileSDKInstance(manifest.id);
 
 export default class HardDiskInfo {
     public static async getAvailableDiskSpace() {

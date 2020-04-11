@@ -1,6 +1,8 @@
 import { logger } from "@project-sunbird/logger";
+import * as fse from "fs-extra";
 import * as _ from "lodash";
 import { containerAPI, ISystemQueue, ITaskExecuter } from "OpenRAP/dist/api";
+import * as os from "os";
 import * as path from "path";
 import { Observer, of } from "rxjs";
 import { retry } from "rxjs/operators";
@@ -63,29 +65,29 @@ export class ContentDeleteHelper implements ITaskExecuter {
   private async checkPath(filePath: string) {
     const regex = /^content/i;
 
-    // if (os.platform() === "win32") {
-    if (filePath.match(regex)) {
-      try {
-        const locationList: any = await this.settingSDK.get(`content_storage_location`);
-        let i = 0;
-        while (i < locationList.location.length) {
-          const folderPath = path.join(locationList.location[i], filePath);
-          if (this.fileSDK.pathExists(folderPath)) {
-            this.prefixPath = locationList.location[i];
-            break;
+    if (os.platform() === "win32") {
+      if (filePath.match(regex)) {
+        try {
+          const locationList: any = await this.settingSDK.get(`content_storage_location`);
+          let i = 0;
+          while (_.get(locationList, "location.length") && i < locationList.location.length) {
+            const folderPath = path.join(locationList.location[i], filePath);
+            if (fse.existsSync(folderPath)) {
+              this.prefixPath = locationList.location[i];
+              break;
+            }
+            i++;
           }
-          i++;
-        }
 
-        return this.prefixPath && !_.includes(this.queue, filePath);
-      } catch (error) {
+          return this.prefixPath && !_.includes(this.queue, filePath);
+        } catch (error) {
+          return false;
+        }
+      } else {
         return false;
       }
     } else {
-      return false;
+      return filePath.match(regex) && !_.includes(this.queue, filePath);
     }
-    // } else {
-    // return filePath.match(regex) && !_.includes(this.queue, filePath);
-    // }
   }
 }

@@ -572,9 +572,12 @@ export class Router {
 
     app.get("/api/desktop/v1/system-info", async (req, res) => {
       try {
-        const systemInfo = await containerAPI
+        const contentLocation = new ContentLocation(manifest.id);
+        const contentBasePath = await contentLocation.get();
+        const systemInfo: any = await containerAPI
           .getSystemSDKInstance(manifest.id)
           .getDeviceInfo();
+        systemInfo.contentBasePath = contentBasePath;
         return res.send(Response.success("api.desktop.system-info", systemInfo, req));
       } catch (err) {
         logger.error(`ReqId = "${req.headers["X-msgid"]}": Received error while processing desktop app systemInfo request where err = ${err}`);
@@ -588,7 +591,6 @@ export class Router {
         const contentPath = _.get(req.body, "request.path");
         const contentLocation = new ContentLocation(manifest.id);
         const status = contentLocation.set(contentPath);
-
         if (status) {
           return res.send(Response.success("api.desktop.change-content-location", status, req));
         } else {

@@ -3,6 +3,7 @@ import {
   BaseServer
 } from "@project-sunbird/ext-framework-server/models";
 import { frameworkAPI } from "@project-sunbird/ext-framework-server/api";
+import * as os from "os";
 import * as path from "path";
 import { Inject } from "typescript-ioc";
 import { Framework } from "./controllers/framework";
@@ -19,6 +20,7 @@ import { containerAPI } from "OpenRAP/dist/api";
 import  ContentDelete from "./controllers/content/contentDelete";
 import * as _ from "lodash";
 import { EventManager } from "@project-sunbird/ext-framework-server/managers/EventManager";
+import ContentLocation from "./controllers/contentLocation";
 
 export class Server extends BaseServer {
   private sunbirded_plugin_initialized = false;
@@ -89,6 +91,21 @@ export class Server extends BaseServer {
       path.join(__dirname, "..", "..", "public", "sunbird-plugins"),
       "/sunbird-plugins"
     );
+
+    if (os.platform() === "win32") {
+      try {
+        const locationList: any = await this.settingSDK.get(`content_storage_location`);
+        if (_.get(locationList, "location.length")) {
+          const contentLocation = new ContentLocation(manifest.id);
+          locationList.location.map((item) => {
+            contentLocation.setContentStaticRoute(item);
+          });
+        }
+      } catch (error) {
+        console.log("in error", error);
+      }
+    }
+
     frameworkAPI.setStaticViewEngine("ejs");
     const response = await this.settingSDK.get(`${process.env.APP_VERSION}_configured`)
     .catch((err) => {

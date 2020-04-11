@@ -1,6 +1,8 @@
 import { frameworkAPI } from "@project-sunbird/ext-framework-server/api";
+import { logger } from "@project-sunbird/logger";
 import * as  _ from "lodash";
 import { containerAPI } from "OpenRAP/dist/api";
+import * as os from "os";
 import * as path from "path";
 
 export default class ContentLocation {
@@ -12,17 +14,23 @@ export default class ContentLocation {
   }
   public async set(contentPath: string) {
     try {
-      const response: any = await this.settingSDK.get(`content_storage_location`);
-      response.location.push(contentPath);
-      const contentLocation = { location: response.location };
-      const status = await this.settingSDK.put(`content_storage_location`, contentLocation);
+      const response: any = await this.settingSDK.get(`content_storage_location`).catch((error) => { logger.error("Error while getting content storage location", error); });
+      const contentLocation = { location: [] };
+
+      if (_.get(response, "location")) {
+        response.location.push(contentPath);
+        contentLocation.location = response.location;
+      } else {
+        contentLocation.location = [contentPath];
+      }
+
+      const status = await this.settingSDK.put(`content_storage_location`, contentLocation)
+        .catch((error) => { logger.error("Error while adding data to setting SDK", error); });
 
       if (status) {
-        frameworkAPI.registerStaticRoute(path.join(contentPath, "content"), "/content");
-        frameworkAPI.registerStaticRoute(path.join(contentPath, "content"), "/contentPlayer/preview/content");
-        frameworkAPI.registerStaticRoute(path.join(contentPath, "content"), "/contentPlayer/preview");
-        frameworkAPI.registerStaticRoute(path.join(contentPath, "content"), "/contentPlayer/preview/content/*/content-plugins");
-        await this.fileSDK.mkdir("content", contentPath);
+        this.setContentStaticRoute(contentPath);
+        await this.fileSDK.mkdir("content", contentPath)
+          .catch((error) => { logger.error("Error creating directory", error); });
       }
 
       return status;
@@ -32,19 +40,28 @@ export default class ContentLocation {
   }
 
   public async get() {
-    // if (os.platform() === "win32") {
-    try {
-      const contentDirPath: any = await this.settingSDK.get(`content_storage_location`);
+    if (os.platform() === "win32") {
+      try {
+        const contentDirPath: any = await this.settingSDK.get(`content_storage_location`);
 
-      if (_.get(contentDirPath, "location.length")) {
-        return path.join(contentDirPath.location[contentDirPath.location.length - 1], "content");
+        if (_.get(contentDirPath, "location.length")) {
+          return path.join(contentDirPath.location[contentDirPath.location.length - 1], "content");
+        } else {
+          return this.fileSDK.getAbsPath("content");
+        }
+
+      } catch (error) {
+        return this.fileSDK.getAbsPath("content");
       }
-
-    } catch (error) {
+    } else {
       return this.fileSDK.getAbsPath("content");
     }
-    // } else {
-    //   return this.fileSDK.getAbsPath("content");
-    // }
+  }
+
+  public setContentStaticRoute(contentPath: string) {
+    frameworkAPI.registerStaticRoute(path.join(contentPath, "content"), "/content");
+    frameworkAPI.registerStaticRoute(path.join(contentPath, "content"), "/contentPlayer/preview/content");
+    frameworkAPI.registerStaticRoute(path.join(contentPath, "content"), "/contentPlayer/preview");
+    frameworkAPI.registerStaticRoute(path.join(contentPath, "content"), "/contentPlayer/preview/content/*/content-plugins");
   }
 }
