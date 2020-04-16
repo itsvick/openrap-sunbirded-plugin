@@ -43,7 +43,7 @@ export default class ContentLocation {
   public async get() {
     if (os.platform() === "win32") {
       try {
-        const contentDirPath: any = await this.settingSDK.get(`content_storage_location`);
+        const contentDirPath: any = await this.settingSDK.get("content_storage_location");
 
         if (_.get(contentDirPath, "location.length")) {
           return path.join(contentDirPath.location[contentDirPath.location.length - 1], "content");
