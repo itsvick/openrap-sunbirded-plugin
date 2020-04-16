@@ -8,7 +8,9 @@ import * as path from "path";
 export default class ContentLocation {
   private fileSDK;
   private settingSDK;
+  private manifestID;
   constructor(manifestId) {
+    this.manifestID = manifestId;
     this.fileSDK = containerAPI.getFileSDKInstance(manifestId);
     this.settingSDK = containerAPI.getSettingSDKInstance(manifestId);
   }
@@ -30,7 +32,8 @@ export default class ContentLocation {
 
       if (status) {
         this.setContentStaticRoute(contentPath);
-        await this.fileSDK.mkdir("content", contentPath)
+        const fileSDKContentInstance = containerAPI.getFileSDKInstance(this.manifestID, contentPath);
+        await fileSDKContentInstance.mkdir("content")
           .catch((error) => { logger.error("Error creating directory", error); });
       }
 
