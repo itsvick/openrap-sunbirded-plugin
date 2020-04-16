@@ -102,7 +102,7 @@ export class Server extends BaseServer {
           });
         }
       } catch (error) {
-        console.log("in error", error);
+        logger.error("Error while fetching content storage location", error);
       }
     }
 

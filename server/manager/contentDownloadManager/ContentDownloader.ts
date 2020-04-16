@@ -38,6 +38,8 @@ export class ContentDownloader implements ITaskExecuter {
   private contentLocation = new ContentLocation(manifest.id);
   public async start(contentDownloadData: ISystemQueue, observer: Observer<ISystemQueue>) {
     this.databaseSdk.initialize(manifest.id);
+    const contentPath = await this.contentLocation.get();
+    this.fileSDK = containerAPI.getFileSDKInstance(manifest.id, contentPath);
     this.contentDownloadData = contentDownloadData;
     this.observer = observer;
     this.contentDownloadMetaData = this.contentDownloadData.metaData;
@@ -181,9 +183,10 @@ export class ContentDownloader implements ITaskExecuter {
       if (this.interrupt) {
         return;
       }
+      const fileSDKInstance = containerAPI.getFileSDKInstance(manifest.id);
       for (const item of itemsToDelete) {
-        await this.fileSDK.remove(item).catch((error) => {
-          logger.error(`Received error while deleting content path: ${path} and error: ${error}`);
+        await fileSDKInstance.remove(item).catch((error) => {
+          logger.error(`Received error while deleting ecar path: ${path} and error: ${error}`);
         });
       }
       this.checkForAllTaskCompletion();
@@ -212,7 +215,7 @@ export class ContentDownloader implements ITaskExecuter {
     await this.checkSpaceAvailability(path.join(this.ecarBasePath, contentDetails.downloadId), zipHandler);
     const entries = zipHandler.entries();
     const contentPath = await this.contentLocation.get();
-    await this.fileSDK.mkdir(contentDetails.identifier, contentPath);
+    await this.fileSDK.mkdir(contentDetails.identifier);
     for (const entry of _.values(entries) as any) {
       await this.extractZipEntry(zipHandler, entry.name,
         path.join(contentPath, contentDetails.identifier));
@@ -228,7 +231,7 @@ export class ContentDownloader implements ITaskExecuter {
         contentDetails.identifier, path.basename(metaData.artifactUrl)));
       logger.debug(`${this.contentDownloadData._id}:Extracting artifact url content: ${contentId}`);
       await this.fileSDK.unzip(path.join(contentDetails.identifier, path.basename(metaData.artifactUrl)),
-        contentDetails.identifier, false, contentPath);
+      contentDetails.identifier, false);
       itemsToDelete.push(path.join("content", contentDetails.identifier, path.basename(metaData.artifactUrl)));
     }
     contentDetails.step = "EXTRACT";

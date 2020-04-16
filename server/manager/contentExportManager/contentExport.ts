@@ -53,7 +53,7 @@ export class ExportContent {
       this.cb(null, data);
     } catch (error) {
       this.cb(error, null);
-      logger.error("Got Error while exporting content", this.ecarName, error, this.corruptContents);
+      logger.error("Error while exporting content", this.ecarName, error, this.corruptContents);
     }
   }
   private async loadParentCollection(): Promise<boolean> {
@@ -259,14 +259,14 @@ export class ExportContent {
         while (_.get(locationList, "location.length") && i < locationList.location.length) {
           const item = path.join(locationList.location[i], "content");
           const folderPath = path.join(item, contentId);
-          if (fse.existsSync(folderPath)) {
+          if (await fileSDK.isDirectoryExists(folderPath)) {
             this.contentBaseFolder = item;
             break;
           }
           i++;
         }
       } catch (error) {
-        logger.error("Got Error while exporting content", error);
+        logger.error("Error while exporting content", error);
       }
     }
   }

@@ -16,6 +16,7 @@ let dbContents;
 let manifestJson;
 let contentImportData: ISystemQueue;
 const fileSDK = containerAPI.getFileSDKInstance(manifest.id);
+let fileSDKContentInstance = containerAPI.getFileSDKInstance(manifest.id);
 const pluginBasePath = fileSDK.getAbsPath("");
 let contentFolder = fileSDK.getAbsPath("content");
 const ecarFolder = fileSDK.getAbsPath("ecars");
@@ -76,7 +77,7 @@ const parseEcar = async () => {
     const ecarBasePath = path.join(ecarFolder, contentImportData._id + ".ecar");
     const contentBasePath = path.join(contentFolder, contentImportData._id); // temp path
     zipHandler = await loadZipHandler(ecarBasePath).catch(handelError("LOAD_ECAR"));
-    await fileSDK.mkdir(contentImportData._id, contentFolder);
+    await fileSDKContentInstance.mkdir(contentImportData._id);
     zipEntries = zipHandler.entries();
     const manifestEntry = zipEntries["manifest.json"] || zipEntries["/manifest.json"];
     if (!manifestEntry) {
@@ -158,7 +159,7 @@ const extractEcar = async () => {
       }
       const contentBasePath = (collection && !parent) ?
         [contentImportData.metaData.contentId, content.identifier] : [content.identifier];
-      await fileSDK.mkdir(path.join(...contentBasePath), contentFolder);
+      await fileSDKContentInstance.mkdir(path.join(...contentBasePath));
       await extractZipEntry(content.identifier, contentBasePath, content.appIcon, syncFunc);
       await extractZipEntry(content.identifier, contentBasePath, "manifest.json", syncFunc);
       if (collection) {
@@ -181,7 +182,7 @@ const extractEcar = async () => {
         artifactToBeUnzippedSize += artifactExtracted.compressedSize;
         artifactToBeUnzipped.push({
           contentId: content.identifier,
-          src: path.join(contentFolder, ...contentBasePath, path.basename(artifactExtracted.name)),
+          src: path.join(...contentBasePath, path.basename(artifactExtracted.name)),
           size: artifactExtracted.compressedSize,
         });
       } else {
@@ -203,7 +204,9 @@ const extractEcar = async () => {
     await unzipArtifacts(artifactToBeUnzipped, artifactToBeUnzippedSize)
       .catch(handelError("EXTRACT_ARTIFACTS")); // extract all zip artifacts
     process.send({ message: "LOG", logType: "info", logBody: [contentImportData._id, "artifacts unzipped"] });
-    await removeFile(path.join("ecars", contentImportData._id + ".ecar")); // delete ecar folder
+    fileSDK.remove(path.join("ecars", contentImportData._id + ".ecar"))
+    .catch((err) => process.send({ message: "LOG", logType: "error", logBody: [contentImportData._id, "error while deleting ecar folder", location] }));
+
     await removeFile(contentImportData._id); // delete temp content folder which has manifest.json
     sendMessage(ImportSteps.extractEcar);
   } catch (err) {
@@ -213,12 +216,12 @@ const extractEcar = async () => {
 };
 
 const removeFile = (location) => {
-  return fileSDK.remove(location, contentFolder)
+  return fileSDKContentInstance.remove(location)
     .catch((err) => process.send({ message: "LOG", logType: "error", logBody: [contentImportData._id, "error while deleting ecar folder", location] }));
 };
 
 const unzipFile = async (src, dest = path.dirname(src)) => {
-  await fileSDK.unzip(src, dest, false)
+  await fileSDKContentInstance.unzip(src, dest, false)
     .catch((err) => process.send({ message: "LOG", logType: "error", logBody: [contentImportData._id, "error while unzip file", src] }));
 };
 
@@ -236,7 +239,7 @@ const unzipArtifacts = async (artifactToBeUnzipped = [], artifactToBeUnzippedSiz
   syncFunc().unsubscribe();
 };
 const extractZipArtifact = async (artifact) => {
-  const zipArtifactZipHandler: any = await loadZipHandler(path.join(pluginBasePath, artifact.src));
+  const zipArtifactZipHandler: any = await loadZipHandler(path.join(contentFolder, artifact.src));
   const zipArtifactEntries = zipArtifactZipHandler.entries();
   await checkSpaceAvailability(zipArtifactEntries);
   await unzipFile(artifact.src);
@@ -269,6 +272,7 @@ process.on("message", (data) => {
 
     if (data.contentFolder) {
       contentFolder = data.contentFolder;
+      fileSDKContentInstance = containerAPI.getFileSDKInstance(manifest.id, contentFolder);
     }
   }
   if (data.message === ImportSteps.copyEcar) {

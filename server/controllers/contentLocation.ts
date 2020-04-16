@@ -14,6 +14,7 @@ export default class ContentLocation {
   }
   public async set(contentPath: string) {
     try {
+      contentPath = path.join(contentPath, process.env.APP_NAME);
       const response: any = await this.settingSDK.get(`content_storage_location`).catch((error) => { logger.error("Error while getting content storage location", error); });
       const contentLocation = { location: [] };
 

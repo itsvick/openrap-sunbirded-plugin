@@ -44,6 +44,8 @@ export class ImportContent implements ITaskExecuter {
     return this.contentImportData;
   }
   public async start(contentImportData: ISystemQueue, observer: Observer<ISystemQueue>) {
+    const contentLocationPath = await this.contentLocation.get();
+    this.fileSDK = containerAPI.getFileSDKInstance(manifest.id, contentLocationPath);
     this.contentImportData = contentImportData;
     this.observer = observer;
     this.contentFolderPath = await this.contentLocation.get();
@@ -83,7 +85,9 @@ export class ImportContent implements ITaskExecuter {
   }
 
   public cleanUpAfterErrorOrCancel() {
-    this.fileSDK.remove(path.join("ecars", this.contentImportData._id + ".ecar")).catch((err) => logger.debug(`Error while deleting file ${path.join("ecars", this.contentImportData._id + ".ecar")}`));
+    const fileSDKEcarInstance = containerAPI.getFileSDKInstance(manifest.id);
+    fileSDKEcarInstance.remove(path.join("ecars", this.contentImportData._id + ".ecar")).catch((err) => logger.debug(`Error while deleting file ${path.join("ecars", this.contentImportData._id + ".ecar")}`));
+
     this.fileSDK.remove(path.join(this.contentFolderPath, this.contentImportData._id)).catch((err) => logger.debug(`Error while deleting folder ${path.join("content", this.contentImportData._id)}`));
     // TODO: delete content folder if there"s no record in db;
   }
@@ -185,7 +189,7 @@ export class ImportContent implements ITaskExecuter {
 
   private async saveContentsToDb(dbContents) {
     this.manifestJson = await this.fileSDK.readJSON(
-      path.join(path.join(this.contentFolderPath, this.contentImportData.metaData.contentId), "manifest.json"));
+      path.join(path.join(this.fileSDK.getAbsPath(""), this.contentImportData.metaData.contentId), "manifest.json"));
     const resources = _.reduce(_.get(this.manifestJson, "archive.items"), (acc, item) => {
       const parentContent = item.identifier === this.contentImportData.metaData.contentId;
       if (item.mimeType === "application/vnd.ekstep.content-collection" && !parentContent) {

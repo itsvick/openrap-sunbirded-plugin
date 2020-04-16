@@ -40,6 +40,7 @@ export class ContentDeleteHelper implements ITaskExecuter {
 
   public async pushToQueue(filePath) {
     if (await this.checkPath(filePath)) {
+        this.fileSDK = containerAPI.getFileSDKInstance(manifest.id, this.prefixPath);
         this.queue.push(filePath);
         this.next();
     }
@@ -48,7 +49,7 @@ export class ContentDeleteHelper implements ITaskExecuter {
   private next() {
     while (this.queue.length) {
         const filePath = this.queue.shift();
-        const deleteSub = of(this.fileSDK.remove(filePath, this.prefixPath)).pipe(retry(5));
+        const deleteSub = of(this.fileSDK.remove(filePath)).pipe(retry(5));
         const deleteSubscription = deleteSub.subscribe({
                 next: (val) => {
                     if (this.queue.length === 0) {
@@ -72,7 +73,8 @@ export class ContentDeleteHelper implements ITaskExecuter {
           let i = 0;
           while (_.get(locationList, "location.length") && i < locationList.location.length) {
             const folderPath = path.join(locationList.location[i], filePath);
-            if (fse.existsSync(folderPath)) {
+            const isDirExist = await this.fileSDK.isDirectoryExists(folderPath).catch((err) => console.log("Error while checking directory path"));
+            if (isDirExist) {
               this.prefixPath = locationList.location[i];
               break;
             }
@@ -81,7 +83,7 @@ export class ContentDeleteHelper implements ITaskExecuter {
 
           return this.prefixPath && !_.includes(this.queue, filePath);
         } catch (error) {
-          return false;
+          return this.prefixPath && !_.includes(this.queue, filePath);
         }
       } else {
         return false;
