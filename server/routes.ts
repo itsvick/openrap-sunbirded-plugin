@@ -626,7 +626,7 @@ export class Router {
       try {
         const contentPath = _.get(req.body, "request.path");
         const contentLocation = new ContentLocation(manifest.id);
-        const status = contentLocation.set(contentPath);
+        const status = contentLocation.set(path.join(contentPath));
         if (status) {
           return res.send(Response.success("api.desktop.change-content-location", status, req));
         } else {
