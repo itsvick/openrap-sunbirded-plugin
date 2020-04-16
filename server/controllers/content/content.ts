@@ -18,14 +18,16 @@ import { ExportContent } from "../../manager/contentExportManager"
 import TelemetryHelper from "../../helper/telemetryHelper";
 import { response } from "express";
 const sessionStartTime = Date.now();
+const ContentSearchUrl = `${process.env.APP_BASE_URL}/api/content/v1/search`;
+const DefaultRequestOptions = { headers: { "Content-Type": "application/json" } };
 import { ClassLogger } from "@project-sunbird/logger/decorator";
 
 const INTERVAL_TO_CHECKUPDATE = 1
 
-@ClassLogger({
-  logLevel: "debug",
-  logTime: true
-})
+// @ClassLogger({
+//   logLevel: "debug",
+//   logTime: true
+// })
 export default class Content {
     private deviceId: string;
     private contentsFilesPath: string = 'content';
@@ -143,7 +145,8 @@ export default class Content {
             const listData = [];
             _.forEach(dbData, (data) => {
                 const listObj = {
-                    contentId: _.get(data, 'metaData.contentId'),
+                    // tslint:disable-next-line: max-line-length
+                    contentId: _.get(data, 'metaData.contentId') ? _.get(data, 'metaData.contentId') : _.get(data, '_id'),
                     identifier: _.get(data, 'metaData.contentId'),
                     id: _.get(data, '_id'),
                     resourceId: _.get(data, 'metaData.contentId'),
@@ -203,23 +206,11 @@ export default class Content {
                 }
                 if (data.length === 0) {
                     logger.info(`ReqId = "${req.headers['X-msgid']}": Contents NOT found in DB`);
-                    if (_.get(filters, "dialcodes")) {
-                        let contents = await this.getMimeTypeCollections(_.get(filters, "dialcodes")[0]);
-                        contents = _.isEqual(mode, `soft`) ? await this.getOrderedContents(contents,
-                            _.omit(pageReqFilter, `contentType`))
-                        : contents;
-                        resObj = {
-                            content: contents,
-                            count: contents.length,
-                            facets,
-                        };
-                    } else {
                         resObj = {
                             content: [],
                             count: 0,
                             facets,
                         };
-                    }
                 } else {
                     const downloadedContents = await this.changeContentStatus(data, req.headers['X-msgid']);
                     if (downloadedContents.length > 0) {
@@ -256,6 +247,121 @@ export default class Content {
                 }
             });
     }
+
+
+    public async searchDialCode(req: any, res: any): Promise<any> {
+        try {
+            const filters = _.get(req, `body.request.filters`);
+            let contents;
+            const dialcode = _.isArray(_.get(filters, "dialcodes")) ? _.get(filters, "dialcodes")[0] : _.get(filters, "dialcodes")
+            contents = await this.getMimeTypeCollections(dialcode);
+            const downloadedContents = await this.changeContentStatus(contents, req.headers['X-msgid']);
+            if (downloadedContents.length > 0) {
+                contents = downloadedContents;
+            }
+            contents = await this.getOrderedContents(contents, _.get(req, `body.request.userProfile`));
+            contents = _.map(contents, (content) => _.omit(content, ['_id', '_rev']));
+            const resObj = {
+                response: {
+                    ignoredSections: [],
+                    name: "DIAL Code Consumption",
+                    id: "0126541330541690882",
+                    sections: [
+                        {
+                            display: "{\"name\":{\"en\":\"Linked Content\"}}",
+                            alt: null,
+                            description: null,
+                            index: 1,
+                            sectionDataType: "content",
+                            facets: [],
+                            imgUrl: null,
+                            name: "Linked Content",
+                            id: "0126541330342952961",
+                            dynamicFilters: null,
+                            dataSource: null,
+                            apiId: "api.content.search",
+                            group: 1,
+                            searchQuery: JSON.stringify(req.body),
+                            contents,
+                        },
+                    ],
+                },
+            };
+            return res.send(Response.success(`api.page.assemble`, resObj, req.body.request));
+        } catch (err) {
+            if (err.status === 404) {
+                res.status(404);
+                return res.send(Response.error(`api.page.assemble`, 404));
+            } else {
+                const status = err.status || 500;
+                res.status(status);
+                return res.send(Response.error(`api.page.assemble`, status));
+            }
+        }
+    }
+
+    public decorateDialSearchContents(sections, msgId) {
+        return new Promise(async (resolve, reject) => {
+            const dialCode = { contents: [], contentIds: [] };
+            if (sections.length > 1) {
+                for (const section of sections) {
+                    const data = await this.getSectionContents(section);
+                    dialCode.contentIds = _.concat(dialCode.contentIds, data[`contentIds`]);
+                    dialCode.contents = _.concat(dialCode.contents, _.get(data, `contents`));
+                }
+            } else {
+                const data = await this.getSectionContents(sections[0]);
+                dialCode.contentIds = _.get(data, `contentIds`);
+                dialCode.contents = _.get(data, `contents`);
+            }
+            if (dialCode.contentIds.length > 0) {
+                dialCode.contentIds = _.uniq(dialCode.contentIds);
+                const childContents = await this.getChildDataFromApi(dialCode.contentIds);
+                dialCode.contents = _.concat(dialCode.contents, childContents);
+            }
+            dialCode.contents = _.uniqBy(dialCode.contents, `identifier`);
+            dialCode.contents =  await this.decorateContentWithProperty(dialCode.contents, msgId);
+            sections[0].contents = dialCode.contents;
+            resolve(sections);
+        });
+    }
+
+    private getSectionContents (section) {
+    return new Promise(async (resolve, reject) => {
+        let contents = [];
+        let contentIds = [];
+        if (_.get(section, `collectionsCount`) > 1) {
+            contents = _.get(section, `collections`);
+            resolve({contents, contentIds});
+        } else {
+            _.forEach(_.get(section, `contents`), (content) => {
+                if ((_.get(content, `contentType`)).toLowerCase() === `textbook`) {
+                    contents.push(content);
+                } else if ((_.get(content, `contentType`)).toLowerCase() === `textbookunit`) {
+                    contentIds = _.uniq(_.concat(contentIds, _.get(content, `children`)));
+                }
+            });
+            resolve({contents, contentIds});
+        }
+    });
+    }
+
+    private getChildDataFromApi (childNodes) {
+        if (!childNodes || !childNodes.length) {
+            return Promise.resolve([]);
+          }
+        const requestBody = {
+            request: {
+              filters: {
+                identifier: childNodes,
+                mimeType: { "!=": "application/vnd.ekstep.content-collection" },
+              },
+              limit: childNodes.length,
+            },
+          };
+        return HTTPService.post(ContentSearchUrl, requestBody, DefaultRequestOptions).toPromise()
+            .then((response) => _.get(response, "data.result.content") || []);
+        }
 
     private getOrderedContents(contents, userFilters) {
         return new Promise(async (resolve, reject) => {
@@ -300,21 +406,21 @@ export default class Content {
     }
 
     private async getMimeTypeCollections(dialCode: string) {
-        const dbData = await this.databaseSdk.find("content", {
-            selector: {
-                mimeType: "application/vnd.ekstep.content-collection",
-            },
-        });
+            let childContents = [];
+            const dbData = await this.databaseSdk.find("content", {
+                selector: {
+                    mimeType: "application/vnd.ekstep.content-collection",
+                },
+            });
 
-        if (dbData.docs.length) {
-            for (const content of dbData.docs) {
-                    const resp = await this.getDialCodeResources(content, dialCode);
-                    if (!_.isEmpty(resp)) {
-                        return resp;
-                    }
+            if (dbData.docs.length) {
+                for (const content of dbData.docs) {
+                        const resp = await this.getDialCodeResources(content, dialCode);
+                        childContents = _.concat(childContents, resp);
+                }
+                return childContents;
             }
-        }
-        return [];
+            return [];
     }
 
     private async getDialCodeResources(content: {}, dialCode: string) {
@@ -323,14 +429,17 @@ export default class Content {
         treeModel = model.parse(content);
         const contentIds: string[] = [];
         treeModel.walk((node) => {
-            if (node.model.dialcodes && _.includes(node.model.dialcodes, dialCode)) {
-                if (node.model.mimeType === "application/vnd.ekstep.content-collection") {
+            if (node.model.dialcodes &&
+                (_.includes(node.model.dialcodes, (dialCode).toUpperCase()) ||
+                _.includes(node.model.dialcodes, (dialCode).toLowerCase()))) {
+                if ((node.model.contentType).toLowerCase() === "textbookunit" &&
+                    node.model.mimeType === "application/vnd.ekstep.content-collection") {
                     node.all((childNode) => {
                         if (childNode.model.mimeType !== "application/vnd.ekstep.content-collection") {
                             contentIds.push(childNode.model.identifier);
                         }
                     });
-                } else {
+                } else if ((node.model.contentType).toLowerCase() === "textbook") {
                     contentIds.push(node.model.identifier);
                 }
             }

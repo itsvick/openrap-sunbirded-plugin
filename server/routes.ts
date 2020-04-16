@@ -440,6 +440,42 @@ export class Router {
       },
   }));
 
+    app.post(`/api/data/v1/dial/assemble`,
+      (req, res, next) => {
+        const online = Boolean(_.get(req, "query.online") && req.query.online.toLowerCase() === "true");
+        if (online) {
+          req = updateRequestBody(req);
+          next();
+        } else {
+          content.searchDialCode(req, res);
+          return;
+        }
+      },
+      proxy(proxyUrl, {
+        proxyReqPathResolver(req) {
+          return `/api/data/v1/dial/assemble`;
+        },
+        userResDecorator(proxyRes, proxyResData, req) {
+          return new Promise(function(resolve) {
+            const proxyData = content.convertBufferToJson(proxyResData, req);
+            const sections = _.get(proxyData, "result.response.sections");
+            if (!_.isEmpty(_.get(sections[0], `contents`))) {
+              content
+                .decorateDialSearchContents(sections, req.headers["X-msgid"])
+                .then((data) => {
+                  proxyData.result.response.sections = data;
+                  resolve(proxyData);
+                })
+                .catch((err) => {
+                  resolve(proxyData);
+                });
+            } else {
+              resolve(proxyData);
+            }
+          });
+        },
+      }));
+
     app.post(
       "/api/content/v1/search",
       (req, res, next) => {

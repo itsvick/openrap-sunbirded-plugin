@@ -98,12 +98,19 @@ export class ContentImportManager {
       return ecarPaths;
     }
     ecarPaths = _.filter(ecarPaths, (ecarPath) => {
-      if (_.find(registeredJobs, { ecarSourcePath: ecarPath })) {
+      if (this.findPath(registeredJobs.docs,  ecarPath )) {
         return false;
       } else {
         return true;
       }
     });
     return ecarPaths;
+  }
+  private findPath(docs, filePath: string) {
+    const exist = _.find(docs, (o: any) => {
+      return o.metaData.sourcePath === filePath;
+    });
+    if (exist) { return true; }
+    return false;
   }
 }
