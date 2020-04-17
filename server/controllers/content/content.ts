@@ -218,7 +218,14 @@ export default class Content {
                     }
                     data = _.isEqual(mode, `soft`) ? await this.getOrderedContents(data,
                         _.omit(pageReqFilter, `contentType`)) : data;
+
+                    data = _.map(data, (content) => {
+                        if (this.isAvailableOffline(content)) {
+                            return content;
+                        }
+                    });
                     logger.info(`ReqId = "${req.headers['X-msgid']}": Contents = ${data.length} found in DB`)
+
                     resObj = {
                         content: data,
                         count: data.length,
@@ -251,16 +258,33 @@ export default class Content {
 
     public async searchDialCode(req: any, res: any): Promise<any> {
         try {
+            logger.debug(
+                `ReqId = "${req.headers['X-msgid']}": searchDialCode is called`
+            );
             const filters = _.get(req, `body.request.filters`);
             let contents;
             const dialcode = _.isArray(_.get(filters, "dialcodes")) ? _.get(filters, "dialcodes")[0] : _.get(filters, "dialcodes")
+            logger.info(
+                `ReqId = "${req.headers['X-msgid']}": getMimeTypeCollections() is calling with ${dialcode} from searchDialCode() `
+            );
             contents = await this.getMimeTypeCollections(dialcode);
+            logger.info(
+                `ReqId = "${req.headers['X-msgid']}": changeContentStatus() is calling with ${contents} from searchDialCode() `
+            );
             const downloadedContents = await this.changeContentStatus(contents, req.headers['X-msgid']);
             if (downloadedContents.length > 0) {
                 contents = downloadedContents;
             }
+            logger.info(
+                `ReqId = "${req.headers['X-msgid']}": getOrderedContents() is calling with ${contents} from searchDialCode() `
+            );
             contents = await this.getOrderedContents(contents, _.get(req, `body.request.userProfile`));
             contents = _.map(contents, (content) => _.omit(content, ['_id', '_rev']));
+            contents = _.map(contents, (content) => {
+                if (this.isAvailableOffline(content)) {
+                    return content;
+                }
+            });
             const resObj = {
                 response: {
                     ignoredSections: [],
@@ -282,13 +306,21 @@ export default class Content {
                             apiId: "api.content.search",
                             group: 1,
                             searchQuery: JSON.stringify(req.body),
-                            contents,
+                            contents: _.compact(contents),
                         },
                     ],
                 },
             };
+            logger.debug(
+                `ReqId = "${req.headers['X-msgid']}": returning the response for searchDialCode`
+            );
             return res.send(Response.success(`api.page.assemble`, resObj, req.body.request));
         } catch (err) {
+            logger.error(
+                `ReqId = "${req.headers['X-msgid']}":  Received error while searching content - err.message: ${
+                err.message
+                } ${err}`
+            );
             if (err.status === 404) {
                 res.status(404);
                 return res.send(Response.error(`api.page.assemble`, 404));
@@ -302,24 +334,42 @@ export default class Content {
 
     public decorateDialSearchContents(sections, msgId) {
         return new Promise(async (resolve, reject) => {
+            logger.debug(
+                `ReqId = "${msgId}": decorateDialSearchContents is called with sections and length is ${sections.length}`
+            );
             const dialCode = { contents: [], contentIds: [] };
             if (sections.length > 1) {
+                logger.info(
+                    `ReqId = "${msgId}": sections length is ${sections.length} > 1
+                    and calling 
+                    getSectionContents() for each section`,
+                );
                 for (const section of sections) {
                     const data = await this.getSectionContents(section);
                     dialCode.contentIds = _.concat(dialCode.contentIds, data[`contentIds`]);
                     dialCode.contents = _.concat(dialCode.contents, _.get(data, `contents`));
                 }
             } else {
+                logger.info(
+                    `ReqId = "${msgId}": sections length is ${sections.length} <= 1 and calling 
+                    getSectionContents()`,
+                );
                 const data = await this.getSectionContents(sections[0]);
                 dialCode.contentIds = _.get(data, `contentIds`);
                 dialCode.contents = _.get(data, `contents`);
             }
+            logger.info(
+                `ReqId = "${msgId}": dialCode.contentIds length is ${dialCode.contentIds.length} `,
+            );
             if (dialCode.contentIds.length > 0) {
                 dialCode.contentIds = _.uniq(dialCode.contentIds);
                 const childContents = await this.getChildDataFromApi(dialCode.contentIds);
                 dialCode.contents = _.concat(dialCode.contents, childContents);
             }
             dialCode.contents = _.uniqBy(dialCode.contents, `identifier`);
+            logger.info(
+                `ReqId = "${msgId}": decorateContentWithProperty() is calling `,
+            );
             dialCode.contents =  await this.decorateContentWithProperty(dialCode.contents, msgId);
             sections[0].contents = dialCode.contents;
             resolve(sections);
@@ -328,6 +378,9 @@ export default class Content {
 
     private getSectionContents (section) {
     return new Promise(async (resolve, reject) => {
+        logger.debug(
+            ` getSectionContents() is called `,
+        );
         let contents = [];
         let contentIds = [];
         if (_.get(section, `collectionsCount`) > 1) {
@@ -335,6 +388,10 @@ export default class Content {
             resolve({contents, contentIds});
         } else {
             _.forEach(_.get(section, `contents`), (content) => {
+                logger.info(
+                    `content ${content.identifier} type
+                    is ${content.contentType} and mimetype is: ${content.mimeType}`,
+                );
                 if ((_.get(content, `contentType`)).toLowerCase() === `textbook`) {
                     contents.push(content);
                 } else if ((_.get(content, `contentType`)).toLowerCase() === `textbookunit`) {
@@ -347,6 +404,9 @@ export default class Content {
     }
 
     private getChildDataFromApi (childNodes) {
+        logger.debug(
+            `getChildDataFromApi() is called with ${childNodes}`,
+        );
         if (!childNodes || !childNodes.length) {
             return Promise.resolve([]);
           }
@@ -359,12 +419,18 @@ export default class Content {
               limit: childNodes.length,
             },
           };
+        logger.debug(
+            `getChildDataFromApi() is calling content search API`,
+            );
         return HTTPService.post(ContentSearchUrl, requestBody, DefaultRequestOptions).toPromise()
             .then((response) => _.get(response, "data.result.content") || []);
         }
 
     private getOrderedContents(contents, userFilters) {
         return new Promise(async (resolve, reject) => {
+            logger.debug(
+                `getOrderedContents() is called`,
+                );
             const matchedContents = { all: [], some: [], one: []};
             _.forEach(contents,  (content) => {
                 const contentFilters = _.pick(content, [`board`, `medium`, `gradeLevel`, `subject`]);
@@ -393,7 +459,10 @@ export default class Content {
                     contents = _.reject(contents, {identifier: content.identifier});
                 }
             });
-
+            logger.debug(
+                `all the matched Contents = ${matchedContents.all.length}, some  matched Contents = ${matchedContents.some.length},
+                one matched Contents = ${matchedContents.one.length}`,
+                );
             const orderContents: object[] = _.concat(matchedContents.all, matchedContents.some, matchedContents.one);
             // push the unmatched contents at the end of the orderContents
             _.forEach(contents, (content) => {
@@ -406,7 +475,13 @@ export default class Content {
     }
 
     private async getMimeTypeCollections(dialCode: string) {
+            logger.debug(
+            `getMimeTypeCollections() is called`,
+            );
             let childContents = [];
+            logger.info(
+                `finding data from db`,
+                );
             const dbData = await this.databaseSdk.find("content", {
                 selector: {
                     mimeType: "application/vnd.ekstep.content-collection",
@@ -424,11 +499,17 @@ export default class Content {
     }
 
     private async getDialCodeResources(content: {}, dialCode: string) {
+        logger.debug(
+            `getDialCodeResources() is called with dialcode: ${dialCode} and content: ${content}`,
+            );
         const model = new TreeModel();
         let treeModel;
         treeModel = model.parse(content);
         const contentIds: string[] = [];
         treeModel.walk((node) => {
+            logger.info(
+                `dialcode for content : ${_.get(node.model, `dialcodes`)} and user requested dialcode: ${dialCode}`,
+            );
             if (node.model.dialcodes &&
                 (_.includes(node.model.dialcodes, (dialCode).toUpperCase()) ||
                 _.includes(node.model.dialcodes, (dialCode).toLowerCase()))) {
@@ -444,6 +525,9 @@ export default class Content {
                 }
             }
         });
+        logger.info(
+            `found dialcode contentIds for content ${content['identifier']} : ${contentIds}`,
+        );
         if (_.isEmpty(contentIds)) {
             return [];
         }
@@ -454,6 +538,9 @@ export default class Content {
                 },
             },
         };
+        logger.info(
+            `finding contents for ${contentIds} in DB`,
+        );
         const dbData = await this.databaseSdk.find("content", dbFilter);
         return dbData.docs;
     }
