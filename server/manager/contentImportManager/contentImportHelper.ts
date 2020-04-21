@@ -21,6 +21,7 @@ const pluginBasePath = fileSDK.getAbsPath("");
 let contentFolder = fileSDK.getAbsPath("content");
 const ecarFolder = fileSDK.getAbsPath("ecars");
 const systemSDK = containerAPI.getSystemSDKInstance(manifest.id);
+let availableDiskSpace;
 
 const syncCloser = (initialProgress, percentage, totalSize = contentImportData.metaData.contentSize) => {
   initialProgress = initialProgress ? initialProgress : contentImportData.progress;
@@ -40,8 +41,6 @@ const syncCloser = (initialProgress, percentage, totalSize = contentImportData.m
 
 const copyEcar = async () => {
   try {
-    // Need to show popup on minimum space availability
-    const availableDiskSpace = await HardDiskInfo.getAvailableDiskSpace();
     process.send({ message: "LOG", logType: "info",
     logBody: [contentImportData._id, "Disk Space availability check",
     contentImportData.metaData.contentSize, availableDiskSpace] });
@@ -128,7 +127,6 @@ const extractZipEntry = async (identifier: string, contentBasePath: string[], en
   return entryObj;
 };
 const checkSpaceAvailability = async (entries, extractedEntries = contentImportData.metaData.extractedEcarEntries) => {
-  const availableDiskSpace = await HardDiskInfo.getAvailableDiskSpace();
   let contentSize = 0; // size in bytes
   for (const entry of _.values(entries) as any) {
     if (!extractedEntries[entry.name]) {
@@ -273,6 +271,10 @@ process.on("message", (data) => {
     if (data.contentFolder) {
       contentFolder = data.contentFolder;
       fileSDKContentInstance = containerAPI.getFileSDKInstance(manifest.id, contentFolder);
+    }
+
+    if (data.availableDiskSpace) {
+      availableDiskSpace = data.availableDiskSpace;
     }
   }
   if (data.message === ImportSteps.copyEcar) {
