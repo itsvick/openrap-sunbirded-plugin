@@ -1,3 +1,4 @@
+import HardDiskInfo from "../../utils/hardDiskInfo";
 import * as childProcess from "child_process";
 import { ErrorObj, IContentImportData, ImportSteps } from "./IContentImport";
 import { Inject } from "typescript-ioc";
@@ -54,9 +55,11 @@ export class ImportContent implements ITaskExecuter {
     this.handleWorkerCloseEvents();
     switch (this.contentImportData.metaData.step) {
       case ImportSteps.copyEcar: {
+        const availableDiskSpace = await HardDiskInfo.getAvailableDiskSpace();
         this.workerProcessRef.send({
           message: this.contentImportData.metaData.step,
           contentImportData: this.contentImportData,
+          availableDiskSpace,
         });
         break;
       }
@@ -131,11 +134,13 @@ export class ImportContent implements ITaskExecuter {
         contentIds.push(...this.contentImportData.metaData.childNodes);
       }
       const dbContents = await this.getContentsFromDB(contentIds);
+      const availableDiskSpace = await HardDiskInfo.getAvailableDiskSpace();
       this.workerProcessRef.send({
         message: this.contentImportData.metaData.step,
         contentImportData: this.contentImportData,
         dbContents,
         contentFolder: this.contentFolderPath,
+        availableDiskSpace,
       });
     } catch (err) {
       this.observer.next(this.contentImportData);
