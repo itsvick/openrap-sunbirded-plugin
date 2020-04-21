@@ -16,12 +16,13 @@ import { Location } from './controllers/location';
 import DatabaseSDK from "./sdk/database";
 import config from "./config";
 import { logger } from "@project-sunbird/logger";
-import { containerAPI } from "OpenRAP/dist/api";
+import { containerAPI, ISystemQueue } from "OpenRAP/dist/api";
 import  ContentDelete from "./controllers/content/contentDelete";
 import * as _ from "lodash";
 import { EventManager } from "@project-sunbird/ext-framework-server/managers/EventManager";
 import ContentLocation from "./controllers/contentLocation";
 
+const REQUIRED_SYSTEM_QUEUE_TASK = ["IMPORT", "DOWNLOAD", "DELETE"];
 export class Server extends BaseServer {
   private sunbirded_plugin_initialized = false;
   private ecarsFolderPath: string = "ecars";
@@ -36,12 +37,14 @@ export class Server extends BaseServer {
   @Inject
   private contentDelete: ContentDelete;
   private settingSDK;
+  private perfLogger;
   constructor(manifest: Manifest) {
     super(manifest);
-
+    this.perfLogger = containerAPI.getPerfLoggerInstance();
     // Added timeout since db creation is async and it is taking time and insertion is failing
     this.fileSDK = containerAPI.getFileSDKInstance(manifest.id);
     this.settingSDK = containerAPI.getSettingSDKInstance(manifest.id);
+    this.handleSystemQueueTaskCompletionEvents();
     this.initialize(manifest)
       .then(() => {
         this.sunbirded_plugin_initialized = true;
@@ -55,6 +58,32 @@ export class Server extends BaseServer {
         this.sunbirded_plugin_initialized = true;
         EventManager.emit(`${manifest.id}:initialized`, {});
       });
+  }
+  public handleSystemQueueTaskCompletionEvents() {
+    EventManager.subscribe("SystemQueue:TASK_COMPLETE",
+      (data: ISystemQueue) => {
+      if (!_.includes(REQUIRED_SYSTEM_QUEUE_TASK, data.type)) {
+          return;
+      }
+      if (_.includes(["IMPORT", "DOWNLOAD"], data.type)) {
+        this.addPerfLogForImportAndDownload(data);
+      } else if (data.type === "DELETE") {
+        this.addPerfLogForDelete(data);
+      }
+    });
+  }
+  private addPerfLogForDelete(data: ISystemQueue) {
+    //TODO: need to be implemented
+  }
+  private addPerfLogForImportAndDownload(data: ISystemQueue) {
+    let runTime: number = data.runTime;
+    const contentSizeInMb: number = data.metaData.contentSize / 1e+6;
+    runTime = runTime / contentSizeInMb;
+    this.perfLogger.log({
+      type: data.type,
+      time: runTime,
+      metaData: {},
+    });
   }
   async initialize(manifest: Manifest) {
     //registerAcrossAllSDKS()
