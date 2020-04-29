@@ -11,7 +11,7 @@ const parseFile = async () => {
   try {
     zipHandler = await loadZipHandler(telemetryImportData.metaData.sourcePath);
     zipEntries = zipHandler.entries();
-    const manifestEntry = zipEntries["manifest.json"];
+    const manifestEntry = zipEntries["manifest.json"] || zipEntries["/manifest.json"];;
     if (!manifestEntry) {
       throw getErrorObj({ message: "manifest.json is missing in the zip" }, "MANIFEST_MISSING");
     }
@@ -59,7 +59,7 @@ const getFileData = async (data) => {
 };
 
 const streamItems = async (item) => {
-  const gzEntry = zipEntries[item.file];
+  const gzEntry = zipEntries[item.file] || zipEntries["/" + item.file] ;
   const telePacketData = await getFileData(gzEntry);
   const dbData = {
     ...item, requestBody: telePacketData,
