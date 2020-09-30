@@ -434,11 +434,20 @@ export class Router {
       }),
     );
 
-    app.get(`/device/profile/:id`, proxy(proxyUrl, {
+    app.get(`/device/profile/:id`,
+    async (req, res, next) => {
+      logger.debug(`Received API call to get device profile`);
+      const apiKey = await containerAPI.getDeviceSdkInstance().getToken().catch((err) => {
+          logger.error(`Received error while fetching api key in device profile with error: ${err}`);
+      });
+      req.headers.Authorization = `Bearer ${apiKey}`;
+      next();
+    },
+    proxy(proxyUrl, {
       proxyReqPathResolver(req) {
           return `/api/v3/device/profile/:id`;
       },
-  }));
+    }));
 
     app.post(`/api/data/v1/dial/assemble`,
       (req, res, next) => {
