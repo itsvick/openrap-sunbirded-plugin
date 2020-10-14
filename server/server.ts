@@ -21,8 +21,10 @@ import  ContentDelete from "./controllers/content/contentDelete";
 import * as _ from "lodash";
 import { EventManager } from "@project-sunbird/ext-framework-server/managers/EventManager";
 import ContentLocation from "./controllers/contentLocation";
+import { LogSyncManager } from "./manager/logSyncManager";
 
 const REQUIRED_SYSTEM_QUEUE_TASK = ["IMPORT", "DOWNLOAD", "DELETE"];
+const LOG_SYNC_INTERVAL = 2 * 60 * 60 * 1000; // Triggers on every 2 hrs
 export class Server extends BaseServer {
   private sunbirded_plugin_initialized = false;
   private ecarsFolderPath: string = "ecars";
@@ -36,6 +38,7 @@ export class Server extends BaseServer {
 
   @Inject
   private contentDelete: ContentDelete;
+  @Inject private logSyncManager: LogSyncManager
   private settingSDK;
   private perfLogger;
   constructor(manifest: Manifest) {
@@ -159,8 +162,14 @@ export class Server extends BaseServer {
     await this.fileSDK.mkdir(this.ecarsFolderPath);
     //- reIndex()
     //- reConfigure()
+    this.syncLogs();
   }
 
+  private syncLogs() {
+    setInterval(async () => {
+      await this.logSyncManager.start();
+    }, LOG_SYNC_INTERVAL);
+  }
   private async insertConfig(manifest: Manifest) {
     const framework = new Framework(manifest);
     const faqs = new Faqs(manifest);
