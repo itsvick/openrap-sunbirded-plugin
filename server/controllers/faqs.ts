@@ -27,19 +27,27 @@ export class Faqs {
       this.faqsBasePath = this.fileSDK.getAbsPath(path.join("data", "faqs"));
   }
   public async insert() {
-    const files = await this.fileSDK.readdir(path.join("data", "faqs"));
-    const dbData = await this.databaseSdk.list(FAQS_DB, {limit: 1});
-    logger.info("--Inserting faqs to db--", dbData.total_rows, files.length);
-    if (!dbData.total_rows && files.length) {
-      const bulkDocs = [];
-      for (const file of files) {
-        const data: IFaqsData = await this.fileSDK.readJSON(path.join(this.faqsBasePath, file));
-        bulkDocs.push({
-          _id: path.basename(file, path.extname(file)),
-          data,
-        });
+    try {
+      const files = await this.fileSDK.readdir(path.join("data", "faqs"));
+      const dbData = await this.databaseSdk.list(FAQS_DB, {limit: 1});
+      logger.info("--Inserting faqs to db--", dbData.total_rows, files.length);
+      if (!dbData.total_rows && files.length) {
+        const bulkDocs = [];
+        for (const file of files) {
+          const data: IFaqsData = await this.fileSDK.readJSON(path.join(this.faqsBasePath, file));
+          bulkDocs.push({
+            _id: path.basename(file, path.extname(file)),
+            data,
+          });
+        }
+        await this.databaseSdk.bulk(FAQS_DB, bulkDocs);
       }
-      await this.databaseSdk.bulk(FAQS_DB, bulkDocs);
+    } catch (err) {
+      logger.error({
+        msg: "faqs:insert caught exception while inserting faqs with error",
+        errorMessage: err.message,
+        error: err,
+      });
     }
   }
   public async read(req, res) {
@@ -48,7 +56,7 @@ export class Faqs {
     if (faqs) {
       res.send(Response.success("api.faqs.read", { faqs }, req));
     } else {
-      logger.error(`Got error while fetching Faq for language: `, language, `for ReqId: ${req.get("x-msgid")} `);
+      logger.error(`FAQ not found for language: `, language, `for ReqId: ${req.get("x-msgid")} `);
       res.status(404).send(Response.error("api.faqs.read", 404));
     }
   }

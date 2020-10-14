@@ -33,7 +33,15 @@ export default class Appupdate {
     }
 
     public async getDeviceId(manifest) {
-        this.deviceId = await containerAPI.getSystemSDKInstance(manifest.id).getDeviceId();
+        try {
+            this.deviceId = await containerAPI.getSystemSDKInstance(manifest.id).getDeviceId();
+        } catch (err) {
+            logger.error({
+                msg: "appUpdate:getDeviceId caught exception while fetching device id with error",
+                errorMessage: err.message,
+                error: err,
+            });
+        }
     }
     public async getDesktopAppUpdate(req, res) {
         try {
@@ -49,7 +57,7 @@ export default class Appupdate {
 
     public async getAppInfo(req, res) {
             const data = await this.checkForUpdate().catch((error) =>
-            logger.error(`error while checking for update ${error.message} ${error.status}`));
+            logger.error(`error while checking for update ${error.message} ${error}`));
             return res.send(Response.success("api.app.info", {
                 termsOfUseUrl: `${process.env.APP_BASE_URL}/term-of-use.html`,
                 version: process.env.APP_VERSION,

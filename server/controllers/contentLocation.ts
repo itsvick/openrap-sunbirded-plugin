@@ -39,6 +39,7 @@ export default class ContentLocation {
 
       return status;
     } catch (error) {
+      logger.error("Error while setting content storage location", error);
       throw new error(error);
     }
   }
@@ -55,6 +56,7 @@ export default class ContentLocation {
         }
 
       } catch (error) {
+        logger.error("Error while getting content storage location", error);
         return this.fileSDK.getAbsPath("content");
       }
     } else {
