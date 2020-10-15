@@ -1,74 +1,62 @@
-import { logger } from "@project-sunbird/logger";
-import * as fs from "fs";
+import { enableLogger, getLogs, logLevels } from "@project-sunbird/logger";
+import * as _ from "lodash";
 import * as path from "path";
-import { ErrorObj, getErrorObj, handelError } from "./ILogSync";
+import { ErrorObj, getErrorObj, ILogAPIFormat } from "./ILogSync";
 
-const logsStack = [];
-const MAX_LOG_LENGTH = 30;
-const MAX_FILES = 10;
+const MAX_LOG_LENGTH = 30; // Number of entries
+const MAX_DAYS_TO_TRACE_TIMESTAMP = 10 * 24 * 60 * 60 * 1000; // 10 days
 
-function readFile(filePath) {
-  const file = fs.readFileSync(filePath, "utf-8").split(/\r?\n/);
-  for (let index = 1; index <= MAX_LOG_LENGTH; index++) {
-    if (index > file.length || logsStack.length === MAX_LOG_LENGTH) {
-      break;
-    }
-    const line = file[file.length - index];
-    if (line.length) {
-      logsStack.push(JSON.parse(line));
-    }
-  }
-}
-
-const formatDate = (date) => {
-  return date.toISOString().slice(0, 10); // YYYY-MM-DD
-};
-
-function getPreviousDate(currentDate) {
-  const previousDate = new Date(currentDate);
-  previousDate.setDate(previousDate.getDate() - 1);
-  return previousDate;
-}
-
-function getFilePath(date) {
-  const formattedDate = formatDate(date);
-  const fileName = `app-${formattedDate}.log`;
-  const basePath = path.join(process.env.FILES_PATH, "logs");
-
-  return path.join(basePath, fileName);
-}
-
-const getLogs = () => {
-  try {
-
-    let currentDay = new Date();
-    let filePath = getFilePath(currentDay);
-    if (fs.existsSync(filePath)) {
-      readFile(filePath);
-    }
-    let dayIndex = 1;
-    while (logsStack.length <= MAX_LOG_LENGTH) {
-      if (dayIndex >= MAX_FILES) {
-        break;
-      }
-      currentDay = getPreviousDate(currentDay);
-      filePath = getFilePath(currentDay);
-      if (fs.existsSync(filePath)) {
-        readFile(filePath);
-      } else {
-        break;
-      }
-      dayIndex++;
-    }
-
-    sendMessage("SYNC_LOGS");
-  } catch (error) {
-    sendMessage("IMPORT_ERROR", getErrorObj(error, "UNHANDLED_ERROR_LOG_SYNC_ERROR"));
+const getAllLogs = () => {
+  enableLogger({
+    logBasePath: path.join(process.env.FILES_PATH, "logs"),
+    logLevel: process.env.LOG_LEVEL as logLevels,
+    context: { src: "desktop" },
+    adopterConfig: {
+      adopter: "winston",
+    },
+  });
+  const date = new Date();
+  const fromDay = new Date(date.getTime() - MAX_DAYS_TO_TRACE_TIMESTAMP);
+  type OrderType = "asc" | "desc";
+  const options = {
+    fields: ["message", "timestamp", "src", "level"],
+    from: fromDay, // 10 days back
+    until: new Date(), // today
+    rows: MAX_LOG_LENGTH,
+    limit: MAX_LOG_LENGTH,
+    start: 0,
+    order: "desc" as OrderType,
   };
+  if (getLogs) {
+    getLogs(options)
+      .then((logs) => {
+        if (_.get(logs, "dailyRotateFile.length")) {
+          const errorLogs = formatLogs(logs.dailyRotateFile);
+          sendMessage("SYNC_LOGS", errorLogs);
+        }
+      })
+      .catch((error) => {
+        sendMessage("ERROR_LOG_SYNC_ERROR", [], getErrorObj(error, "UNHANDLED_ERROR_LOG_SYNC_ERROR"));
+      });
+  }
 };
 
-const sendMessage = (message: string, err?: ErrorObj) => {
-  const messageObj: any = { message, logs: JSON.stringify(logsStack) };
+const formatLogs = (logs: any[]) => {
+  const errorLogs = _.filter(logs, (item) => item.level === "error");
+  const logList: ILogAPIFormat[] = _.map(errorLogs, (log) => {
+    return {
+      appver: process.env.APP_VERSION,
+      pageid: log.src,
+      ts: log.timestamp,
+      log: log.message,
+    };
+  });
+
+  return logList;
+};
+
+const sendMessage = (message: string, logs = null, err?: ErrorObj) => {
+  const messageObj: any = { message, logs };
   if (err) {
     messageObj.err = err;
   }
@@ -77,7 +65,7 @@ const sendMessage = (message: string, err?: ErrorObj) => {
 
 process.on("message", (data) => {
   if (data.message === "GET_LOGS") {
-    getLogs();
+    getAllLogs();
   } else if (data.message === "KILL") {
     sendMessage("LOG_SYNC_KILL");
   }

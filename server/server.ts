@@ -24,7 +24,7 @@ import ContentLocation from "./controllers/contentLocation";
 import { LogSyncManager } from "./manager/logSyncManager";
 
 const REQUIRED_SYSTEM_QUEUE_TASK = ["IMPORT", "DOWNLOAD", "DELETE"];
-const LOG_SYNC_INTERVAL = 2 * 60 * 60 * 1000; // Triggers on every 2 hrs
+const LOG_SYNC_INTERVAL_TIMESTAMP = 2 * 60 * 60 * 1000; // Triggers on every 2 hrs
 export class Server extends BaseServer {
   private sunbirded_plugin_initialized = false;
   private ecarsFolderPath: string = "ecars";
@@ -167,8 +167,12 @@ export class Server extends BaseServer {
 
   private syncLogs() {
     setInterval(async () => {
-      await this.logSyncManager.start();
-    }, LOG_SYNC_INTERVAL);
+      try {
+        await this.logSyncManager.start();
+      } catch (error) {
+        logger.error("Error while syncing error logs", error);
+      }
+    }, LOG_SYNC_INTERVAL_TIMESTAMP);
   }
   private async insertConfig(manifest: Manifest) {
     const framework = new Framework(manifest);

@@ -13,3 +13,10 @@ export const handelError = (errCode) => {
     throw getErrorObj(error, errCode);
   };
 };
+
+export interface ILogAPIFormat {
+  appver: string;
+  pageid: string;
+  ts: number;
+  log: string;
+}

@@ -16,13 +16,16 @@ export class LogSyncManager {
   private networkQueue: NetworkQueue;
   private settingSDK;
   private workerProcessRef: childProcess.ChildProcess;
+  private isInProgress = false;
 
   constructor() {
     this.networkQueue = containerAPI.getNetworkQueueInstance();
     this.settingSDK = containerAPI.getSettingSDKInstance(manifest.id);
   }
   public async start() {
-    await this.checkPreviousLogSync();
+    if (!this.isInProgress) {
+      await this.checkPreviousLogSync();
+    }
   }
 
   private async checkPreviousLogSync() {
@@ -30,14 +33,15 @@ export class LogSyncManager {
     const errorLogDBData = await this.settingSDK.get(LAST_ERROR_LOG_SYNC_ON).catch(() => undefined);
     const lastSyncDate = _.get(errorLogDBData, "lastSyncOn");
     if (!lastSyncDate || !this.isToday(lastSyncDate)) {
-      this.launchChildProcess();
+      await this.launchChildProcess();
     }
   }
 
-  private launchChildProcess() {
+  private async launchChildProcess() {
+    this.isInProgress = true;
+    await this.getDeviceId();
     this.workerProcessRef = childProcess.fork(path.join(__dirname, "logSyncHelper"));
     this.handleChildProcessMessage();
-    this.getDeviceId();
     this.workerProcessRef.send({
       message: "GET_LOGS",
     });
@@ -47,10 +51,13 @@ export class LogSyncManager {
     this.workerProcessRef.on("message", async (data) => {
       if (data.message === "SYNC_LOGS" && _.get(data, "logs.length")) {
         this.syncLogsToServer(data.logs);
-      } else if (data.message === "IMPORT_ERROR") {
+        this.isInProgress = false;
+      } else if (data.message === "ERROR_LOG_SYNC_ERROR") {
         this.handleChildProcessError(data.err);
+        this.isInProgress = false;
       } else {
         this.handleChildProcessError({ errCode: "UNHANDLED_WORKER_MESSAGE", errMessage: "unsupported import step" });
+        this.isInProgress = false;
       }
     });
   }
@@ -61,37 +68,45 @@ export class LogSyncManager {
       "did": this.deviceId,
     };
 
-    const requestBody = {
-      pdata: undefined,
-      context: undefined,
-      logs,
-    };
-
     const request = {
-      bearerToken: false,
+      bearerToken: true,
       pathToApi: `${process.env.APP_BASE_URL}/api/data/v1/client/logs`,
       requestHeaderObj: headers,
       subType: "LOGS",
-      requestBody,
+      requestBody: this.buildRequestBody(logs),
     };
-    await this.networkQueue.add(request).then((data) => {
+    this.networkQueue.add(request).then((data) => {
+      logger.info("Added in queue");
+      this.killChildProcess();
       this.updateLastSyncDate(Date.now());
+    }).catch((error) => {
+      logger.error("Error while adding to Network queue", error);
     });
   }
 
-  private async handleKillSignal() {
-    return new Promise((resolve, reject) => {
-      this.workerProcessRef.on("message", async (data) => {
-        if (data.message === "LOG_SYNC_KILL") {
-          this.workerProcessRef.kill();
-          resolve();
-        }
-      });
-    });
+  private buildRequestBody(logs = []) {
+    return {
+      request: {
+        context: {
+          env: manifest.id,
+          did: this.deviceId,
+        },
+        pdata: {
+          id: process.env.APP_ID,
+          ver: process.env.APP_VERSION,
+          pid: "desktop.app",
+        },
+        logs,
+      },
+    };
+  }
+
+  private killChildProcess() {
+    this.workerProcessRef.kill();
   }
 
   private handleChildProcessError(error: ErrorObj) {
-    logger.error();
+    logger.error(error.errMessage);
   }
 
   private async updateLastSyncDate(date: number) {
