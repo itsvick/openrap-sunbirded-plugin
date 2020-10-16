@@ -106,6 +106,7 @@ export class LogSyncManager {
   }
 
   private handleChildProcessError(error: ErrorObj) {
+    this.killChildProcess();
     logger.error(error.errMessage);
   }
 
