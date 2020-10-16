@@ -47,7 +47,7 @@ const formatLogs = (logs: any[]) => {
     return {
       appver: process.env.APP_VERSION,
       pageid: log.src,
-      ts: log.timestamp,
+      ts: new Date(log.timestamp).getTime(),
       log: log.message,
     };
   });

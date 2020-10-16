@@ -162,18 +162,20 @@ export class Server extends BaseServer {
     await this.fileSDK.mkdir(this.ecarsFolderPath);
     //- reIndex()
     //- reConfigure()
-    this.syncLogs();
-  }
-
-  private syncLogs() {
+   await this.syncLogs();
     setInterval(async () => {
-      try {
-        await this.logSyncManager.start();
-      } catch (error) {
-        logger.error("Error while syncing error logs", error);
-      }
+      await this.syncLogs();
     }, LOG_SYNC_INTERVAL_TIMESTAMP);
   }
+
+  private async syncLogs() {
+    try {
+      await this.logSyncManager.start();
+    } catch (error) {
+      logger.error("Error while syncing error logs", error);
+    }
+  }
+
   private async insertConfig(manifest: Manifest) {
     const framework = new Framework(manifest);
     const faqs = new Faqs(manifest);

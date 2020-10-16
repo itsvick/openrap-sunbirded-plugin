@@ -54,7 +54,7 @@
   },
   "devDependencies": {
     "@project-sunbird/ext-framework-server": "0.1.26",
-    "@project-sunbird/logger": "0.0.4",
+    "@project-sunbird/logger": "0.0.10",
     "@project-sunbird/telemetry-sdk": "0.0.19",
     "@types/body-parser": "^1.17.0",
     "@types/busboy": "^0.2.3",
