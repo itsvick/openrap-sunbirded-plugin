@@ -35,6 +35,8 @@ const getAllLogs = () => {
         if (_.get(logs, "dailyRotateFile.length")) {
           const errorLogs = formatLogs(logs.dailyRotateFile);
           sendMessage("SYNC_LOGS", errorLogs);
+        } else {
+          sendMessage("SYNC_LOGS");
         }
       })
       .catch((error) => {
@@ -57,7 +59,7 @@ const formatLogs = (logs: any[]) => {
   return logList;
 };
 
-const sendMessage = (message: string, logs = null, err?: ErrorObj) => {
+const sendMessage = (message: string, logs = [], err?: ErrorObj) => {
   const messageObj: any = { message, logs };
   if (err) {
     messageObj.err = err;

@@ -32,7 +32,7 @@ export class LogSyncManager {
     // check in the settingSDK if the LAST_ERROR_LOG_SYNC_ON is not today
     const errorLogDBData = await this.settingSDK.get(LAST_ERROR_LOG_SYNC_ON).catch(() => undefined);
     const lastSyncDate = _.get(errorLogDBData, "lastSyncOn");
-    if (!lastSyncDate || !this.isToday(lastSyncDate)) {
+    if (!lastSyncDate || this.isLessThanToday(lastSyncDate)) {
       await this.launchChildProcess();
     }
   }
@@ -50,6 +50,7 @@ export class LogSyncManager {
   private handleChildProcessMessage() {
     this.workerProcessRef.on("message", async (data) => {
       if (data.message === "SYNC_LOGS" && _.get(data, "logs.length")) {
+        this.killChildProcess();
         this.syncLogsToServer(data.logs);
         this.isInProgress = false;
       } else if (data.message === "ERROR_LOG_SYNC_ERROR") {
@@ -77,7 +78,6 @@ export class LogSyncManager {
     };
     this.networkQueue.add(request).then((data) => {
       logger.info("Added in queue");
-      this.killChildProcess();
       this.updateLastSyncDate(Date.now());
     }).catch((error) => {
       logger.error("Error while adding to Network queue", error);
@@ -113,11 +113,11 @@ export class LogSyncManager {
     await this.settingSDK.put(LAST_ERROR_LOG_SYNC_ON, { lastSyncOn: date });
   }
 
-  private isToday(inputDate: number) {
+  private isLessThanToday(inputDate: number) {
     if (inputDate) {
       inputDate = new Date(inputDate).setHours(0, 0, 0, 0);
       const today = new Date().setHours(0, 0, 0, 0);
-      return today === inputDate;
+      return inputDate < today;
     }
     return false;
   }
