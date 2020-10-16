@@ -18,15 +18,17 @@ const getAllLogs = () => {
   const date = new Date();
   const fromDay = new Date(date.getTime() - MAX_DAYS_TO_TRACE_TIMESTAMP);
   type OrderType = "asc" | "desc";
-  const options = {
+  const options: any = {
     fields: ["message", "timestamp", "src", "level"],
     from: fromDay, // 10 days back
     until: new Date(), // today
-    rows: MAX_LOG_LENGTH,
-    limit: MAX_LOG_LENGTH,
     start: 0,
     order: "desc" as OrderType,
   };
+  if (process.env.LOG_LEVEL === "error") {
+    options.rows = MAX_LOG_LENGTH;
+    options.limit = MAX_LOG_LENGTH;
+  }
   if (getLogs) {
     getLogs(options)
       .then((logs) => {
@@ -42,7 +44,7 @@ const getAllLogs = () => {
 };
 
 const formatLogs = (logs: any[]) => {
-  const errorLogs = _.filter(logs, (item) => item.level === "error");
+  const errorLogs = _.filter(logs, (item) => item.level === "error").slice(0, MAX_LOG_LENGTH);
   const logList: ILogAPIFormat[] = _.map(errorLogs, (log) => {
     return {
       appver: process.env.APP_VERSION,

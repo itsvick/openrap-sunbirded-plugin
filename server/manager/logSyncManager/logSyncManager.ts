@@ -113,10 +113,11 @@ export class LogSyncManager {
     await this.settingSDK.put(LAST_ERROR_LOG_SYNC_ON, { lastSyncOn: date });
   }
 
-  private isToday(inputDate) {
+  private isToday(inputDate: number) {
     if (inputDate) {
-      const today = new Date();
-      return today.setHours(0, 0, 0, 0) === inputDate.setHours(0, 0, 0, 0);
+      inputDate = new Date(inputDate).setHours(0, 0, 0, 0);
+      const today = new Date().setHours(0, 0, 0, 0);
+      return today === inputDate;
     }
     return false;
   }
