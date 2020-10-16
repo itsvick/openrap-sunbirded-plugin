@@ -102,7 +102,11 @@ export class LogSyncManager {
   }
 
   private killChildProcess() {
-    this.workerProcessRef.kill();
+    try {
+      this.workerProcessRef.kill();
+    } catch (error) {
+      logger.error("Error while killing the logSyncHelper child process", error);
+    }
   }
 
   private handleChildProcessError(error: ErrorObj) {
